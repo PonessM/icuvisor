@@ -85,7 +85,7 @@ func TestValidateSportSettingsPaceZonePercentages(t *testing.T) {
 
 func TestUpdateSportSettingsFullModeAppliesZonesAndResponseMeta(t *testing.T) {
 	client := newFakeSportSettingsClient(intervals.SportSettings{ID: 7, Types: []string{"Ride"}, FTP: 250})
-	client.setting = intervals.SportSettings{ID: 7, Type: "Ride", FTP: 280, PowerZones: []int{100, 200}, PowerZoneNames: []string{"Z1", "Z2"}}
+	client.setting = intervals.SportSettings{ID: 7, Type: "Ride", FTP: 280, PowerZoneUpperBoundsPercentOfFTP: []int{100, 200}, PowerZoneNames: []string{"Z1", "Z2"}}
 	tool := newUpdateSportSettingsTool(client, client, "v1.2.3", "UTC", false, safety.NewCapability(safety.ModeFull), responseShaping{deleteMode: safety.ModeFull, toolset: safety.ToolsetCore})
 
 	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"sport":"Ride","ftp":280,"zones":[{"kind":"power","boundaries":[100,200],"names":["Z1","Z2"]}]}`)})

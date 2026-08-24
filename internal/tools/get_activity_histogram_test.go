@@ -15,7 +15,7 @@ func TestGetActivityHistogramConfiguredZoneResponse(t *testing.T) {
 	t.Parallel()
 
 	client := &fakeActivityReadClient{
-		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZones: []int{100, 150}, PowerZoneNames: []string{"Endurance", "Tempo"}}}}},
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{100, 150}, PowerZoneNames: []string{"Endurance", "Tempo"}}}}},
 		activity:          decodeActivityFixture(t, `{"id":"a1","type":"Ride"}`),
 		streams: decodeStreamFixtures(t,
 			`{"type":"watts","data":[90,110,160,200]}`,

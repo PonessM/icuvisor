@@ -213,7 +213,7 @@ func TestGetDataQualityReportAggregatesRestrictedSources(t *testing.T) {
 
 func healthyDataQualityProfile() intervals.AthleteWithSportSettings {
 	return intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC", PreferredUnits: "metric", SportSettings: []intervals.SportSettings{
-		{Types: []string{"Ride"}, FTP: 250, PowerZones: []int{100, 150, 200}, LTHR: 170, HRZones: []int{120, 140, 160}},
+		{Types: []string{"Ride"}, FTP: 250, PowerZoneUpperBoundsPercentOfFTP: []int{100, 150, 200}, LTHR: 170, HRZones: []int{120, 140, 160}},
 		{Types: []string{"Run"}, LTHR: 170, HRZones: []int{120, 140, 160}, ThresholdPace: 3.5714285, PaceUnits: "MINS_KM", PaceLoadType: "RUN", PaceZones: []float64{77.5, 90, 100}},
 	}}
 }

@@ -67,7 +67,7 @@ func TestComputeZoneEnergyReportsPartialActivityCoverageOnlyInFullResponse(t *te
 			zoneEnergyActivityFixture(t, `{"id":"missing","type":"Ride","start_date_local":"2026-01-02T08:00:00","stream_types":["time"]}`),
 			zoneEnergyActivityFixture(t, `{"id":"usable","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`),
 		},
-		profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZones: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
+		profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
 		streams: map[string][]intervals.ActivityStream{
 			"usable": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[100,200,200]}`, `{"type":"time","data":[0,10,20]}`),
 		},
@@ -127,8 +127,8 @@ func TestComputeZoneEnergyAggregatesDisplayedActivityValuesAndReconcilesShares(t
 			zoneEnergyActivityFixture(t, `{"id":"ride-1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`),
 		},
 		profile: intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{
-			{ID: 7, Type: "Ride", PowerZones: []int{0}, PowerZoneNames: []string{"Ride work"}},
-			{ID: 8, Type: "Run", PowerZones: []int{0}, PowerZoneNames: []string{"Run work"}},
+			{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{0}, PowerZoneNames: []string{"Ride work"}},
+			{ID: 8, Type: "Run", PowerZoneUpperBoundsPercentOfFTP: []int{0}, PowerZoneNames: []string{"Run work"}},
 		}},
 		streams: map[string][]intervals.ActivityStream{
 			"ride-1": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[1000,1000]}`, `{"type":"time","data":[0,0.0006]}`),
@@ -208,7 +208,7 @@ func zoneEnergySingleActivityClient(t *testing.T) *zoneEnergyTestClient {
 	t.Helper()
 	return &zoneEnergyTestClient{
 		activities: []intervals.Activity{zoneEnergyActivityFixture(t, `{"id":"a1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`)},
-		profile:    intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZones: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
+		profile:    intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
 		streams:    map[string][]intervals.ActivityStream{"a1": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[100,200]}`, `{"type":"time","data":[0,10]}`)},
 		streamErrs: map[string]error{},
 	}

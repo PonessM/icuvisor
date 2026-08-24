@@ -258,7 +258,7 @@ func histogramZoneConfig(metric analysis.HistogramMetric, emittedUnit string, ac
 	config := analysis.HistogramZoneConfig{Sport: strings.TrimSpace(setting.Type), SportSettingID: setting.ID, Metric: string(metric), Unit: histogramUnitLabel(metric, emittedUnit)}
 	switch metric {
 	case analysis.HistogramMetricPowerWatts:
-		for _, boundary := range setting.PowerZones {
+		for _, boundary := range setting.PowerZoneUpperBoundsPercentOfFTP {
 			config.Boundaries = append(config.Boundaries, float64(boundary))
 		}
 		config.Names = append([]string(nil), setting.PowerZoneNames...)

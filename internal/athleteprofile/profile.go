@@ -186,7 +186,7 @@ func profileSport(setting intervals.SportSettings, includeFull bool, unitSystem 
 		PMaxWatts:       setting.PMax,
 		LTHRBPM:         setting.LTHR,
 		MaxHRBPM:        setting.MaxHR,
-		PowerZonesWatts: setting.PowerZones,
+		PowerZonesWatts: setting.PowerZoneUpperBoundsPercentOfFTP,
 		PowerZoneNames:  setting.PowerZoneNames,
 		HRZonesBPM:      setting.HRZones,
 		HRZoneNames:     setting.HRZoneNames,
@@ -216,7 +216,7 @@ func sportReadinessWarnings(setting intervals.SportSettings) []ReadinessWarning 
 		if setting.FTP <= 0 {
 			warnings = append(warnings, readinessWarning("missing_power_threshold", sportTypes, "ftp_watts", "power threshold is missing for this sport", "Use update_sport_settings with ftp for this sport before power-based planning."))
 		}
-		if len(setting.PowerZones) == 0 {
+		if len(setting.PowerZoneUpperBoundsPercentOfFTP) == 0 {
 			warnings = append(warnings, readinessWarning("missing_power_zones", sportTypes, "power_zones_watts", "power zones are missing for this sport", "Use update_sport_settings with zones kind=power for this sport before zone-based planning."))
 		}
 	}

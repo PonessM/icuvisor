@@ -144,7 +144,7 @@ func TestGetEventsIndoorFlagIsVenueFlagNotFTPOrZoneData(t *testing.T) {
 	t.Parallel()
 
 	client := &fakeEventsTrainingPlanClient{
-		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Ride"}, FTP: 260, IndoorFTP: 240, PowerZones: []int{130, 180, 240, 300}}}}},
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Ride"}, FTP: 260, IndoorFTP: 240, PowerZoneUpperBoundsPercentOfFTP: []int{130, 180, 240, 300}}}}},
 		events:            decodeToolEvents(t, `{"id":"indoor-ride","name":"Trainer tempo","category":"WORKOUT","type":"Ride","start_date_local":"2026-01-03","tags":["trainer","tempo"],"indoor":true}`),
 	}
 	tool := newGetEventsTool(client, client, "test", "UTC", false)

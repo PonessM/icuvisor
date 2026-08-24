@@ -351,7 +351,7 @@ func resourceTestProfile(id string, name string) intervals.AthleteWithSportSetti
 			Types:          []string{"Ride"},
 			FTP:            250,
 			LTHR:           170,
-			PowerZones:     []int{100, 150, 200},
+			PowerZoneUpperBoundsPercentOfFTP: []int{100, 150, 200},
 			PowerZoneNames: []string{"Z1", "Z2", "Z3"},
 		}},
 	}

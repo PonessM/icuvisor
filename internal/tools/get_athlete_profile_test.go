@@ -134,7 +134,7 @@ func TestGetAthleteProfileHandlerSuccess(t *testing.T) {
 			IndoorFTP:      240,
 			WPrime:         20000,
 			PMax:           900,
-			PowerZones:     []int{100, 150, 200},
+			PowerZoneUpperBoundsPercentOfFTP: []int{100, 150, 200},
 			PowerZoneNames: []string{"Z1", "Z2", "Z3"},
 			LTHR:           170,
 			MaxHR:          190,
@@ -204,7 +204,7 @@ func TestGetAthleteProfileKeepsFTPAndZoneBoundariesSeparate(t *testing.T) {
 			Types:          []string{"Ride"},
 			FTP:            250,
 			IndoorFTP:      235,
-			PowerZones:     []int{125, 188, 250, 300},
+			PowerZoneUpperBoundsPercentOfFTP: []int{125, 188, 250, 300},
 			PowerZoneNames: []string{"Z1", "Z2", "Boundary matching FTP", "Z4"},
 		}},
 	}, "test", "UTC")
@@ -235,7 +235,7 @@ func TestGetAthleteProfileDoesNotTreatZoneBoundaryAsIndoorFTP(t *testing.T) {
 		SportSettings: []intervals.SportSettings{{
 			Types:          []string{"Ride"},
 			FTP:            260,
-			PowerZones:     []int{130, 180, 240, 300},
+			PowerZoneUpperBoundsPercentOfFTP: []int{130, 180, 240, 300},
 			PowerZoneNames: []string{"Z1", "Z2", "Looks like indoor FTP", "Z4"},
 		}},
 	}, "test", "UTC")
@@ -369,7 +369,7 @@ func TestGetAthleteProfileHandlerOmitsReadinessWarningsWhenAliasesComplete(t *te
 	tool, _ := newTestProfileTool(t, "test", "UTC", intervals.AthleteWithSportSettings{
 		ID: "i12345",
 		SportSettings: []intervals.SportSettings{
-			{Types: []string{"Ride"}, FTP: 250, FTHR: 170, PowerZones: []int{100, 150}, HRZones: []int{120, 140}},
+			{Types: []string{"Ride"}, FTP: 250, FTHR: 170, PowerZoneUpperBoundsPercentOfFTP: []int{100, 150}, HRZones: []int{120, 140}},
 			{Types: []string{"Run"}, FTHR: 170, HRZones: []int{120, 140}, ThresholdPace: 3.5714285, PaceUnits: "MINS_KM", PaceLoadType: "RUN", PaceZones: []float64{77.5, 90, 100}},
 			{Types: []string{"Swim"}, FTHR: 150, HRZones: []int{120, 140}, ThresholdPace: 2, PaceUnits: "SECS_100M", PaceLoadType: "SWIM", PaceZones: []float64{77.5, 100}},
 		},
@@ -437,7 +437,7 @@ func TestGetAthleteProfileReadinessWarningsOmittedWhenComplete(t *testing.T) {
 	response := newGetAthleteProfileResponse(intervals.AthleteWithSportSettings{
 		ID: "i12345",
 		SportSettings: []intervals.SportSettings{
-			{Types: []string{"Ride"}, FTP: 250, LTHR: 170, PowerZones: []int{100, 150}, HRZones: []int{120, 140}},
+			{Types: []string{"Ride"}, FTP: 250, LTHR: 170, PowerZoneUpperBoundsPercentOfFTP: []int{100, 150}, HRZones: []int{120, 140}},
 			{Types: []string{"Run"}, LTHR: 170, HRZones: []int{120, 140}, ThresholdPace: 3.5714285, PaceUnits: "MINS_KM", PaceLoadType: "RUN", PaceZones: []float64{77.5, 90, 100}},
 			{Types: []string{"Swim"}, LTHR: 150, HRZones: []int{120, 140}, ThresholdPace: 2, PaceUnits: "SECS_100M", PaceLoadType: "SWIM", PaceZones: []float64{77.5, 100}},
 		},

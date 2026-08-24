@@ -209,7 +209,7 @@ func collectZoneEnergy(ctx context.Context, args computeZoneEnergyRequest, activ
 		matched++
 		audit := zoneEnergyActivityRow{ActivityID: activity.ID, Date: zoneEnergyActivityDate(activity), Sport: zoneEnergyActivitySport(activity), Status: "skipped"}
 		setting, matchedSport, ok := selectZoneEnergySportSetting(activity, profile.SportSettings)
-		if !ok || len(setting.PowerZones) == 0 {
+		if !ok || len(setting.PowerZoneUpperBoundsPercentOfFTP) == 0 {
 			audit.Reason = "no_matching_power_zone_config"
 			series = append(series, audit)
 			reasons = append(reasons, audit.Reason)
@@ -360,8 +360,8 @@ func zoneEnergyPowerZoneConfig(setting intervals.SportSettings, matchedSport str
 	if sport == "" {
 		sport = strings.TrimSpace(matchedSport)
 	}
-	boundaries := make([]float64, len(setting.PowerZones))
-	for i, boundary := range setting.PowerZones {
+	boundaries := make([]float64, len(setting.PowerZoneUpperBoundsPercentOfFTP))
+	for i, boundary := range setting.PowerZoneUpperBoundsPercentOfFTP {
 		boundaries[i] = float64(boundary)
 	}
 	names := make([]string, len(boundaries))
