@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ricardocabral/icuvisor/internal/config"
 )
@@ -88,8 +89,12 @@ func (s *CategorySummary) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ListAthleteSummary retrieves athlete summary rows for the request target athlete.
+// ListAthleteSummary retrieves request-target rows whose upstream bucket anchors are inside the requested date window.
 func (c *Client) ListAthleteSummary(ctx context.Context, params AthleteSummaryParams) ([]SummaryWithCats, error) {
+	params, err := normalizeAthleteSummaryParams(params)
+	if err != nil {
+		return nil, fmt.Errorf("listing athlete summary: %w", err)
+	}
 	targetAthleteID, err := c.athleteSummaryTargetID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing athlete summary: %w", err)
@@ -105,6 +110,13 @@ func (c *Client) ListAthleteSummary(ctx context.Context, params AthleteSummaryPa
 			return nil, fmt.Errorf("listing athlete summary: %w", err)
 		}
 		if !owned {
+			continue
+		}
+		withinWindow, err := athleteSummaryRowWithinWindow(raw, params)
+		if err != nil {
+			return nil, fmt.Errorf("listing athlete summary: %w", err)
+		}
+		if !withinWindow {
 			continue
 		}
 		var row SummaryWithCats
@@ -125,8 +137,12 @@ type RawSummaryRow struct {
 	DecodeError string
 }
 
-// ListAthleteSummaryRaw retrieves target-athlete summary elements without applying typed-field fallback.
+// ListAthleteSummaryRaw retrieves target-athlete summary elements without discarding date evidence required by strict analyzers.
 func (c *Client) ListAthleteSummaryRaw(ctx context.Context, params AthleteSummaryParams) ([]RawSummaryRow, error) {
+	params, err := normalizeAthleteSummaryParams(params)
+	if err != nil {
+		return nil, fmt.Errorf("listing raw athlete summary: %w", err)
+	}
 	targetAthleteID, err := c.athleteSummaryTargetID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing raw athlete summary: %w", err)
@@ -188,6 +204,44 @@ func athleteSummaryElementOwnership(element json.RawMessage, targetAthleteID str
 		return nil, "", false, err
 	}
 	return raw, athleteID, owned, nil
+}
+
+func normalizeAthleteSummaryParams(params AthleteSummaryParams) (AthleteSummaryParams, error) {
+	params.Start = strings.TrimSpace(params.Start)
+	params.End = strings.TrimSpace(params.End)
+	for _, field := range []struct {
+		label string
+		value string
+	}{{label: "start", value: params.Start}, {label: "end", value: params.End}} {
+		if field.value == "" {
+			continue
+		}
+		if _, err := time.Parse(time.DateOnly, field.value); err != nil {
+			return AthleteSummaryParams{}, fmt.Errorf("%s must be YYYY-MM-DD", field.label)
+		}
+	}
+	if params.Start != "" && params.End != "" && params.End < params.Start {
+		return AthleteSummaryParams{}, fmt.Errorf("end must be on or after start")
+	}
+	return params, nil
+}
+
+func athleteSummaryRowWithinWindow(raw map[string]any, params AthleteSummaryParams) (bool, error) {
+	date, ok := raw["date"].(string)
+	if !ok {
+		return false, fmt.Errorf("target row date must be YYYY-MM-DD")
+	}
+	date = strings.TrimSpace(date)
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
+		return false, fmt.Errorf("target row date must be YYYY-MM-DD")
+	}
+	if params.Start != "" && date < params.Start {
+		return false, nil
+	}
+	if params.End != "" && date > params.End {
+		return false, nil
+	}
+	return true, nil
 }
 
 func athleteSummaryQuery(params AthleteSummaryParams) url.Values {

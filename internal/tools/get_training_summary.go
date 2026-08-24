@@ -12,7 +12,7 @@ import (
 
 const (
 	getTrainingSummaryName        = "get_training_summary"
-	getTrainingSummaryDescription = "Get aggregated training volume, neutral training load, sRPE, and upstream zone-order totals for a local date range."
+	getTrainingSummaryDescription = "Get training volume, neutral load, sRPE, and upstream zone-order totals from weekly buckets by inclusive athlete-local anchor date; exact partial-week totals cannot be derived."
 	fetchTrainingSummaryMessage   = "could not fetch training summary; check intervals.icu credentials, athlete ID, and date range"
 )
 
@@ -57,6 +57,9 @@ type trainingSummaryMeta struct {
 	StartDate       string                       `json:"start_date"`
 	EndDate         string                       `json:"end_date"`
 	Timezone        string                       `json:"timezone"`
+	SummaryGrain    string                       `json:"summary_grain"`
+	WindowPolicy    string                       `json:"window_policy"`
+	Caveats         []string                     `json:"caveats"`
 	ZoneFamily      string                       `json:"zone_family"`
 	ZoneOrder       string                       `json:"zone_order"`
 	IncludeFull     bool                         `json:"include_full"`
@@ -65,7 +68,7 @@ type trainingSummaryMeta struct {
 
 func newGetTrainingSummaryTool(client FitnessClient, profileClient ProfileClient, version string, timezoneFallback string, debugMetadata bool, shaping ...responseShaping) Tool {
 	shapeCfg := responseShapingOrDefault(shaping)
-	return coreTool(Tool{Name: getTrainingSummaryName, Description: getTrainingSummaryDescription, InputSchema: dateRangeInputSchema("local start date for summary rows"), OutputSchema: genericOutputSchema("Aggregated training summary."), Handler: getTrainingSummaryHandler(client, profileClient, version, timezoneFallback, debugMetadata, shapeCfg)})
+	return coreTool(Tool{Name: getTrainingSummaryName, Description: getTrainingSummaryDescription, InputSchema: athleteSummaryDateRangeInputSchema(), OutputSchema: genericOutputSchema("Aggregated upstream weekly-anchor training summary with partial-week caveats."), Handler: getTrainingSummaryHandler(client, profileClient, version, timezoneFallback, debugMetadata, shapeCfg)})
 }
 
 func getTrainingSummaryHandler(client FitnessClient, profileClient ProfileClient, version string, timezoneFallback string, debugMetadata bool, shapeCfg responseShaping) Handler {
@@ -91,7 +94,7 @@ func getTrainingSummaryHandler(client FitnessClient, profileClient ProfileClient
 }
 
 func shapeTrainingSummary(rows []intervals.SummaryWithCats, args dateRangeRequest, timezone string, unitSystem response.UnitSystem, version string) trainingSummaryResponse {
-	payload := trainingSummaryResponse{Meta: trainingSummaryMeta{ServerVersion: normalizeVersion(version), StartDate: args.StartDate, EndDate: args.EndDate, Timezone: timezone, ZoneFamily: "upstream_timeInZones", ZoneOrder: "upstream", IncludeFull: args.IncludeFull, LoadDiagnostics: loadDiagnostics(rows)}}
+	payload := trainingSummaryResponse{Meta: trainingSummaryMeta{ServerVersion: normalizeVersion(version), StartDate: args.StartDate, EndDate: args.EndDate, Timezone: timezone, SummaryGrain: athleteSummaryGrain, WindowPolicy: athleteSummaryWindowPolicy, Caveats: []string{athleteSummaryPartialWeekNote}, ZoneFamily: "upstream_timeInZones", ZoneOrder: "upstream", IncludeFull: args.IncludeFull, LoadDiagnostics: loadDiagnostics(rows)}}
 	categoryTotals := map[string]*trainingSportTotals{}
 	var distanceMeters float64
 	for _, row := range rows {

@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ricardocabral/icuvisor/internal/analysis"
 	"github.com/ricardocabral/icuvisor/internal/intervals"
@@ -56,8 +54,10 @@ type computeBaselineResult struct {
 	NBaseline                   int                  `json:"n_baseline"`
 	NCurrent                    int                  `json:"n_current"`
 	MinSamples                  int                  `json:"min_samples"`
-	MissingBaselineDays         int                  `json:"missing_baseline_days"`
-	MissingCurrentDays          int                  `json:"missing_current_days"`
+	MissingBaselineDays         *int                 `json:"missing_baseline_days,omitempty"`
+	MissingCurrentDays          *int                 `json:"missing_current_days,omitempty"`
+	MissingBaselineAnchors      *int                 `json:"missing_baseline_anchors,omitempty"`
+	MissingCurrentAnchors       *int                 `json:"missing_current_anchors,omitempty"`
 	FreshnessStatus             string               `json:"freshness_status,omitempty"`
 	CurrentLatestSampleDate     string               `json:"current_latest_sample_date,omitempty"`
 	CurrentWindowEndDate        string               `json:"current_window_end_date,omitempty"`
@@ -78,16 +78,18 @@ type dateWindow struct {
 }
 
 type baselineCollected struct {
-	Baseline            []float64
-	Current             []float64
-	Series              []baselineSample
-	Source              analysis.MetricSource
-	MissingBaselineDays int
-	MissingCurrentDays  int
-	SourceTools         []string
-	Truncated           bool
-	UnsupportedReason   string
-	WellnessFreshness   *wellnessFreshnessSummary
+	Baseline               []float64
+	Current                []float64
+	Series                 []baselineSample
+	Source                 analysis.MetricSource
+	MissingBaselineDays    int
+	MissingCurrentDays     int
+	MissingBaselineAnchors int
+	MissingCurrentAnchors  int
+	SourceTools            []string
+	Truncated              bool
+	UnsupportedReason      string
+	WellnessFreshness      *wellnessFreshnessSummary
 }
 
 func newComputeBaselineTool(fitnessClient FitnessClient, wellnessClient WellnessClient, activitiesClient ActivitiesClient, extendedClient ExtendedMetricsClient, profileClient ProfileClient, version string, timezoneFallback string, debugMetadata bool, shaping ...responseShaping) Tool {
@@ -128,8 +130,21 @@ func computeBaselineHandler(fitnessClient FitnessClient, wellnessClient Wellness
 			stats.Status = "partial"
 		}
 		interpretation := analysis.InterpretBaselineZScore(metric, stats.ZScore)
-		result := computeBaselineResult{Status: stats.Status, Metric: string(metric), MetricSource: sourceDTO(collected.Source), BaselineWindow: dateWindow{args.BaselineStartDate, args.BaselineEndDate}, CurrentWindow: dateWindow{args.CurrentStartDate, args.CurrentEndDate}, CurrentValue: roundOptional(stats.CurrentValue), BaselineMean: roundOptional(stats.BaselineMean), BaselineStdDev: roundOptional(stats.BaselineStdDev), ZScore: roundOptional(stats.ZScore), Interpretation: interpretation, NBaseline: len(collected.Baseline), NCurrent: len(collected.Current), MinSamples: minSamples, MissingBaselineDays: collected.MissingBaselineDays, MissingCurrentDays: collected.MissingCurrentDays, TruncatedActivityCandidates: collected.Truncated, InsufficientReason: stats.Reason}
+		result := computeBaselineResult{Status: stats.Status, Metric: string(metric), MetricSource: sourceDTO(collected.Source), BaselineWindow: dateWindow{args.BaselineStartDate, args.BaselineEndDate}, CurrentWindow: dateWindow{args.CurrentStartDate, args.CurrentEndDate}, CurrentValue: roundOptional(stats.CurrentValue), BaselineMean: roundOptional(stats.BaselineMean), BaselineStdDev: roundOptional(stats.BaselineStdDev), ZScore: roundOptional(stats.ZScore), Interpretation: interpretation, NBaseline: len(collected.Baseline), NCurrent: len(collected.Current), MinSamples: minSamples, TruncatedActivityCandidates: collected.Truncated, InsufficientReason: stats.Reason}
 		assumptions := map[string]any{"metric": string(metric), "interpretation": interpretation, "interpretation_direction": baselineInterpretationDirection(metric), "activity_candidates_truncated": collected.Truncated}
+		if collected.Source.Grain == analysis.GrainWeekly {
+			result.MissingBaselineAnchors = baselineIntPtr(collected.MissingBaselineAnchors)
+			result.MissingCurrentAnchors = baselineIntPtr(collected.MissingCurrentAnchors)
+			assumptions["sample_grain"] = string(analysis.SampleGrainWeekly)
+			assumptions["expected_baseline_anchors"] = len(expectedWeeklyAnchors(args.BaselineStartDate, args.BaselineEndDate))
+			assumptions["expected_current_anchors"] = len(expectedWeeklyAnchors(args.CurrentStartDate, args.CurrentEndDate))
+			assumptions["missing_baseline_anchors"] = collected.MissingBaselineAnchors
+			assumptions["missing_current_anchors"] = collected.MissingCurrentAnchors
+			assumptions["missing_days_applicable"] = false
+		} else {
+			result.MissingBaselineDays = baselineIntPtr(collected.MissingBaselineDays)
+			result.MissingCurrentDays = baselineIntPtr(collected.MissingCurrentDays)
+		}
 		if freshness := collected.WellnessFreshness; freshness != nil {
 			result.FreshnessStatus = freshness.Status
 			result.CurrentLatestSampleDate = freshness.LatestSampleDate
@@ -147,6 +162,8 @@ func computeBaselineHandler(fitnessClient FitnessClient, wellnessClient Wellness
 		return encodeAnalyzerResponse(analyzerResponseInput{Result: result, Series: collected.Series, Meta: meta}, args.IncludeFull, version, debugMetadata, computeBaselineName, unitSystem, shapeCfg)
 	}
 }
+
+func baselineIntPtr(value int) *int { return &value }
 
 func decodeComputeBaselineRequest(raw json.RawMessage) (computeBaselineRequest, analysis.Metric, error) {
 	var args computeBaselineRequest
@@ -185,7 +202,7 @@ func collectBaselineSamples(ctx context.Context, args computeBaselineRequest, me
 	sources := analysis.MetricSources(metric)
 	for _, source := range sources {
 		switch source.Family {
-		case analysis.SourceFitnessDaily, analysis.SourceTrainingSummary, analysis.SourceDerivedWeekly:
+		case analysis.SourceFitnessWeekly, analysis.SourceTrainingSummary:
 			if fitnessClient == nil {
 				continue
 			}
@@ -212,7 +229,6 @@ func collectSummaryBaseline(ctx context.Context, args computeBaselineRequest, me
 	}
 	out := baselineCollected{Source: source, SourceTools: []string{source.Tool}}
 	seenB, seenC := map[string]bool{}, map[string]bool{}
-	weeklyB, weeklyC := map[string]float64{}, map[string]float64{}
 	for _, row := range rows {
 		value, ok := summaryMetricValueForSport(row, metric, unitSystem, source.Field, args.Sport)
 		date := row.Date
@@ -224,17 +240,6 @@ func collectSummaryBaseline(ctx context.Context, args computeBaselineRequest, me
 			out.Series = append(out.Series, baselineSample{Date: date, Window: window, SourceTool: source.Tool, MissingReason: "missing_metric"})
 			continue
 		}
-		if source.Family == analysis.SourceDerivedWeekly {
-			key := isoWeekKey(date)
-			if window == "baseline" {
-				weeklyB[key] += value
-				seenB[date] = true
-			} else {
-				weeklyC[key] += value
-				seenC[date] = true
-			}
-			continue
-		}
 		addBaselineSample(&out, window, date, "", value, source.Tool)
 		if window == "baseline" {
 			seenB[date] = true
@@ -242,13 +247,27 @@ func collectSummaryBaseline(ctx context.Context, args computeBaselineRequest, me
 			seenC[date] = true
 		}
 	}
-	if source.Family == analysis.SourceDerivedWeekly {
-		appendWeeklySamples(&out, "baseline", weeklyB, source.Tool)
-		appendWeeklySamples(&out, "current", weeklyC, source.Tool)
-	}
-	out.MissingBaselineDays = dateCount(args.BaselineStartDate, args.BaselineEndDate) - len(seenB)
-	out.MissingCurrentDays = dateCount(args.CurrentStartDate, args.CurrentEndDate) - len(seenC)
+	out.MissingBaselineAnchors = missingWeeklyAnchorCount(args.BaselineStartDate, args.BaselineEndDate, seenB)
+	out.MissingCurrentAnchors = missingWeeklyAnchorCount(args.CurrentStartDate, args.CurrentEndDate, seenC)
 	return out, nil
+}
+
+func expectedWeeklyAnchors(startDate, endDate string) []string {
+	window, err := analysis.ParseWindow(analysis.Window{StartDate: startDate, EndDate: endDate}, maxAnalyzerWindowDays)
+	if err != nil {
+		return nil
+	}
+	return expectedWeeklyAnchorDates(window)
+}
+
+func missingWeeklyAnchorCount(startDate, endDate string, seen map[string]bool) int {
+	missing := 0
+	for _, anchor := range expectedWeeklyAnchors(startDate, endDate) {
+		if !seen[anchor] {
+			missing++
+		}
+	}
+	return missing
 }
 
 func collectWellnessBaseline(ctx context.Context, args computeBaselineRequest, metric analysis.Metric, source analysis.MetricSource, client WellnessClient) (baselineCollected, error) {
@@ -391,26 +410,6 @@ func summaryMetricValueForSport(row intervals.SummaryWithCats, metric analysis.M
 		}
 	}
 	return 0, false
-}
-
-func appendWeeklySamples(out *baselineCollected, window string, values map[string]float64, tool string) {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		addBaselineSample(out, window, key, "", values[key], tool)
-	}
-}
-
-func isoWeekKey(date string) string {
-	parsed, err := time.Parse(time.DateOnly, date)
-	if err != nil {
-		return date
-	}
-	year, week := parsed.ISOWeek()
-	return fmt.Sprintf("%04d-W%02d", year, week)
 }
 
 func extendedActivityMetricValue(raw map[string]any, field string) (float64, bool) {

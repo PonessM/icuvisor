@@ -164,7 +164,7 @@
     "group": "analyzers",
     "tier": "full",
     "safety": "read",
-    "summary": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat.",
+    "summary": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
     "anchor": "compute_load_balance"
   },
   {
@@ -196,7 +196,7 @@
     "group": "analyzers",
     "tier": "core",
     "safety": "read",
-    "summary": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat.",
+    "summary": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
     "anchor": "compute_zone_time"
   },
   {
@@ -348,7 +348,7 @@
     "group": "fitness",
     "tier": "core",
     "safety": "read",
-    "summary": "Get CTL, ATL, and TSB fitness trends for a local date range.",
+    "summary": "Get upstream weekly CTL, ATL, and TSB buckets by inclusive athlete-local anchor date; exact partial-week values cannot be derived.",
     "anchor": "get_fitness"
   },
   {
@@ -404,7 +404,7 @@
     "group": "fitness",
     "tier": "core",
     "safety": "read",
-    "summary": "Get aggregated training volume, neutral training load, sRPE, and upstream zone-order totals for a local date range.",
+    "summary": "Get training volume, neutral load, sRPE, and upstream zone-order totals from weekly buckets by inclusive athlete-local anchor date; exact partial-week totals cannot be derived.",
     "anchor": "get_training_summary"
   },
   {

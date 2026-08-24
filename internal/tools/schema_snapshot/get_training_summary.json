@@ -6,16 +6,16 @@
       "type": "string"
     },
     "end_date": {
-      "description": "local end date as YYYY-MM-DD in the athlete timezone.",
+      "description": "Inclusive upper bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD.",
       "type": "string"
     },
     "include_full": {
       "default": false,
-      "description": "When true, include raw upstream summary rows.",
+      "description": "When true, include raw upstream weekly rows selected by anchor date; exact partial-week values remain unavailable.",
       "type": "boolean"
     },
     "start_date": {
-      "description": "local start date for summary rows as YYYY-MM-DD in the athlete timezone.",
+      "description": "Inclusive lower bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD.",
       "type": "string"
     }
   },

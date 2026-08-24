@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -16,8 +17,8 @@ import (
 const (
 	computeZoneTimeName                = "compute_zone_time"
 	computeLoadBalanceName             = "compute_load_balance"
-	computeZoneTimeDescription         = "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat. Uses upstream precomputed zone fields and returns polarization metadata with explicit missing/unavailable signals."
-	computeLoadBalanceDescription      = "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat. Uses upstream precomputed zone fields and returns classification with explicit missing/unavailable signals."
+	computeZoneTimeDescription         = "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals. Other paths use activity rows."
+	computeLoadBalanceDescription      = "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals. Other paths use activity rows."
 	invalidComputeZoneArgumentsMessage = "invalid compute zone arguments; provide valid dates, optional sport, and zone_metric power/heart_rate/pace"
 	fetchComputeZoneMessage            = "could not compute zone aggregate; check intervals.icu credentials, athlete ID, and date range"
 	maxComputeActivityCandidates       = 500
@@ -32,15 +33,17 @@ type computeZoneRequest struct {
 }
 
 type zoneAggregate struct {
-	Zones             []float64
-	Rows              []zoneSeriesRow
-	SourceTools       []string
-	MissingSources    []string
-	MissingDays       int
-	N                 int
-	Truncated         bool
-	UsedSummary       bool
-	TrainingLoadTotal float64
+	Zones                 []float64
+	Rows                  []zoneSeriesRow
+	SourceTools           []string
+	MissingSources        []string
+	MissingDays           int
+	ExpectedWeeklyAnchors int
+	MissingWeeklyAnchors  int
+	N                     int
+	Truncated             bool
+	UsedSummary           bool
+	TrainingLoadTotal     float64
 }
 
 type zoneSeriesRow struct {
@@ -191,20 +194,21 @@ func collectZoneAggregate(ctx context.Context, args computeZoneRequest, fitnessC
 		} else {
 			agg.SourceTools = append(agg.SourceTools, getTrainingSummaryName)
 			seenDates := map[string]bool{}
+			agg.ExpectedWeeklyAnchors = len(expectedWeeklyAnchors(args.StartDate, args.EndDate))
 			for _, row := range rows {
-				if len(row.TimeInZones) == 0 || row.TimeInZonesTot <= 0 {
+				if !validSummaryTimeInZones(row.TimeInZones, row.TimeInZonesTot) {
 					agg.Rows = append(agg.Rows, zoneSeriesRow{Date: row.Date, MissingReason: "missing_summary_time_in_zones"})
 					continue
 				}
+				seenDates[row.Date] = true
 				agg.Zones = addZoneSlices(agg.Zones, row.TimeInZones)
 				agg.TrainingLoadTotal += float64(row.TrainingLoad)
 				agg.N++
-				seenDates[row.Date] = true
 				agg.UsedSummary = true
 				balance := analysis.ComputeZoneBalance(row.TimeInZones)
 				agg.Rows = append(agg.Rows, zoneSeriesRow{Date: row.Date, SourceKey: "timeInZones", ZoneSeconds: cloneFloatSlice(row.TimeInZones), LowSeconds: balance.LowSeconds, ModerateSeconds: balance.ModerateSeconds, HighSeconds: balance.HighSeconds})
 			}
-			agg.MissingDays = dateCount(args.StartDate, args.EndDate) - len(seenDates)
+			agg.MissingWeeklyAnchors = missingWeeklyAnchorCount(args.StartDate, args.EndDate, seenDates)
 			if agg.N > 0 {
 				return agg, nil
 			}
@@ -271,6 +275,20 @@ func collectZoneAggregate(ctx context.Context, args computeZoneRequest, fitnessC
 	return agg, nil
 }
 
+func validSummaryTimeInZones(zones []float64, reportedTotal int) bool {
+	if len(zones) == 0 || reportedTotal <= 0 {
+		return false
+	}
+	total := 0.0
+	for _, seconds := range zones {
+		if seconds < 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+			return false
+		}
+		total += seconds
+	}
+	return total > 0
+}
+
 func loadValueForZoneMetric(raw map[string]any) (float64, bool) {
 	keys := []string{"power_load", "hr_load", "pace_load", "icu_training_load"}
 	for _, key := range keys {
@@ -326,7 +344,10 @@ func aggregateStatus(agg zoneAggregate, balance analysis.ZoneBalance) (string, s
 	if agg.N == 0 || balance.TotalSeconds == 0 {
 		return "unavailable", "missing_precomputed_zone_times"
 	}
-	if agg.MissingDays > 0 || len(agg.MissingSources) > 0 {
+	if agg.UsedSummary && (agg.MissingWeeklyAnchors > 0 || len(agg.MissingSources) > 0) {
+		return "partial", "some_weekly_anchors_or_sources_missing"
+	}
+	if agg.MissingDays > 0 || agg.MissingWeeklyAnchors > 0 || len(agg.MissingSources) > 0 {
 		return "partial", "some_days_or_sources_missing"
 	}
 	return "ok", ""
@@ -337,6 +358,14 @@ func zoneAnalyzerMeta(method string, agg zoneAggregate, balance analysis.ZoneBal
 		assumptions["polarization_state"] = balance.State
 	}
 	boundaries := []string{"precomputed zones only; raw streams are not reduced"}
+	if agg.UsedSummary {
+		assumptions["summary_grain"] = athleteSummaryGrain
+		assumptions["summary_window_policy"] = athleteSummaryWindowPolicy
+		assumptions["expected_weekly_anchors"] = agg.ExpectedWeeklyAnchors
+		assumptions["missing_weekly_anchors"] = agg.MissingWeeklyAnchors
+		assumptions["missing_days_applicable"] = false
+		boundaries = append(boundaries, "upstream weekly summary buckets are selected by anchor date; "+athleteSummaryPartialWeekNote)
+	}
 	if agg.Truncated {
 		boundaries = append(boundaries, "activity candidates truncated at deterministic cap")
 	}

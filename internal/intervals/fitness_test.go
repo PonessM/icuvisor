@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -288,6 +289,127 @@ func TestListAthleteSummaryIsolatesTargetAthlete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListAthleteSummaryHonorsRequestedDateWindow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		call      func(context.Context, *Client, AthleteSummaryParams) ([]string, error)
+		wantDates []string
+	}{
+		{
+			name:      "typed rows enforce requested anchors",
+			wantDates: []string{"2026-08-11", "2026-08-24"},
+			call: func(ctx context.Context, client *Client, params AthleteSummaryParams) ([]string, error) {
+				rows, err := client.ListAthleteSummary(ctx, params)
+				if err != nil {
+					return nil, err
+				}
+				dates := make([]string, 0, len(rows))
+				for _, row := range rows {
+					dates = append(dates, row.Date)
+				}
+				return dates, nil
+			},
+		},
+		{
+			name:      "raw rows preserve out of window evidence",
+			wantDates: []string{"2026-08-10", "2026-08-11", "2026-08-24", "2026-08-25"},
+			call: func(ctx context.Context, client *Client, params AthleteSummaryParams) ([]string, error) {
+				rows, err := client.ListAthleteSummaryRaw(ctx, params)
+				if err != nil {
+					return nil, err
+				}
+				dates := make([]string, 0, len(rows))
+				for _, row := range rows {
+					date, _ := row.Raw["date"].(string)
+					dates = append(dates, date)
+				}
+				return dates, nil
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[
+					{"athlete_id":"i12345","date":"2026-08-10","training_load":10},
+					{"athlete_id":"i12345","date":"2026-08-11","training_load":20},
+					{"athlete_id":"i12345","date":"2026-08-24","training_load":30},
+					{"athlete_id":"i12345","date":"2026-08-25","training_load":40}
+				]`))
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+			dates, err := tc.call(context.Background(), client, AthleteSummaryParams{Start: "2026-08-11", End: "2026-08-24"})
+			if err != nil {
+				t.Fatalf("athlete summary call error = %v", err)
+			}
+			if !slices.Equal(dates, tc.wantDates) {
+				t.Fatalf("summary dates = %v, want %v", dates, tc.wantDates)
+			}
+		})
+	}
+}
+
+func TestListAthleteSummaryValidatesDateContracts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid bounds fail before request", func(t *testing.T) {
+		t.Parallel()
+		var requests int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer server.Close()
+		client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+		for _, params := range []AthleteSummaryParams{
+			{Start: "2026-08-11T00:00:00", End: "2026-08-24"},
+			{Start: "2026-08-11", End: "not-a-date"},
+			{Start: "2026-08-24", End: "2026-08-11"},
+		} {
+			if _, err := client.ListAthleteSummary(context.Background(), params); err == nil {
+				t.Fatalf("ListAthleteSummary(%+v) error = nil, want invalid date contract", params)
+			}
+			if _, err := client.ListAthleteSummaryRaw(context.Background(), params); err == nil {
+				t.Fatalf("ListAthleteSummaryRaw(%+v) error = nil, want invalid date contract", params)
+			}
+		}
+		if requests != 0 {
+			t.Fatalf("invalid bounds made %d upstream request(s), want zero", requests)
+		}
+	})
+
+	t.Run("typed target row rejects invalid date while raw retains evidence", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"athlete_id":"i12345","training_load":10},
+				{"athlete_id":"i12345","date":"2026-08-11T00:00:00","training_load":20}
+			]`))
+		}))
+		defer server.Close()
+		client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+		params := AthleteSummaryParams{Start: "2026-08-11", End: "2026-08-24"}
+		if _, err := client.ListAthleteSummary(context.Background(), params); err == nil {
+			t.Fatal("ListAthleteSummary() error = nil, want invalid target-row date")
+		}
+		rows, err := client.ListAthleteSummaryRaw(context.Background(), params)
+		if err != nil {
+			t.Fatalf("ListAthleteSummaryRaw() error = %v", err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("raw rows = %#v, want invalid-date evidence retained", rows)
+		}
+	})
 }
 
 func assertQueryParams(t *testing.T, r *http.Request, want map[string]string, absent []string) {

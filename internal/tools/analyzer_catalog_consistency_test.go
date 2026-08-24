@@ -40,7 +40,7 @@ func TestMetricCatalogSourcesResolveToWorkingExtractors(t *testing.T) {
 					if _, ok := activityMetricValue(activity, metric, response.UnitSystemMetric); !ok {
 						t.Fatalf("activityMetricValue cannot read %s from a fully populated activity row; add an extractor case and upstream field", name)
 					}
-				case analysis.SourceFitnessDaily, analysis.SourceTrainingSummary, analysis.SourceDerivedWeekly:
+				case analysis.SourceFitnessWeekly, analysis.SourceTrainingSummary:
 					if _, ok := summaryMetricValue(summary, metric, response.UnitSystemMetric); !ok {
 						t.Fatalf("summaryMetricValue cannot read %s from a fully populated summary row", name)
 					}
@@ -82,7 +82,7 @@ func TestMetricCatalogAnalyzerReachability(t *testing.T) {
 		reachable := false
 		for _, source := range analysis.MetricSources(analysis.Metric(name)) {
 			switch source.Family {
-			case analysis.SourceFitnessDaily, analysis.SourceWellnessDaily, analysis.SourceTrainingSummary, analysis.SourceActivityRow, analysis.SourceDerivedWeekly, analysis.SourceExtendedActivity:
+			case analysis.SourceFitnessWeekly, analysis.SourceWellnessDaily, analysis.SourceTrainingSummary, analysis.SourceActivityRow, analysis.SourceExtendedActivity:
 				reachable = true
 			}
 		}

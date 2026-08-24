@@ -12,7 +12,7 @@ import (
 
 const (
 	analyzeTrendName        = "analyze_trend"
-	analyzeTrendDescription = "Use when the prompt asks for slope or rolling trend direction over time for one analysis metric; do not fetch get_* rows or streams and reduce them in chat. Computes rolling means, OLS slope, and current-vs-baseline deltas with skipped-missing-day metadata."
+	analyzeTrendDescription = "Use when the prompt asks for slope or rolling trend direction over time for one analysis metric; do not fetch get_* rows or streams and reduce them in chat. Computes rolling means, OLS slope, and current-vs-baseline deltas with separate source-grain coverage metadata."
 	invalidAnalyzeTrendArgs = "invalid analyze_trend arguments; provide metric, window dates, optional baseline_window, rolling_window_days, sport, and include_full"
 	fetchAnalyzeTrendMsg    = "could not analyze trend; check credentials, date range, metric, and sport filter"
 )
@@ -93,6 +93,8 @@ func analyzeTrendHandler(clients analyzerClients, profileClient ProfileClient, v
 		}
 		trend, points := analysis.ComputeTrend(analysis.TrendInput{Metric: string(metric), Unit: currentSeries.Unit, Samples: currentSeries.Samples, BaselineSamples: baselineSeries.Samples, RollingWindow: rolling, MinSamples: minSamples, BaselineMinSamples: minSamples, SampleGrain: grain})
 		assumptions := analyzerMetaAssumptions(currentSeries.Assumptions, window.Window, args.IncludeFull)
+		assumptions["current_series"] = cloneAnalyzerAssumptions(currentSeries.Assumptions)
+		assumptions["baseline_series"] = cloneAnalyzerAssumptions(baselineSeries.Assumptions)
 		if freshness := currentSeries.WellnessFreshness; freshness != nil {
 			trend.FreshnessStatus = freshness.Status
 			trend.LatestSampleDate = freshness.LatestSampleDate
@@ -111,6 +113,14 @@ func analyzeTrendHandler(clients analyzerClients, profileClient ProfileClient, v
 		}
 		return encodeAnalyzerResponse(analyzerResponseInput{Result: trend, Series: points, Meta: analysis.AnalyzerMetaInput{Method: "ols_trend_with_baseline", SourceTools: mergeSourceTools(currentSeries, baselineSeries), N: trend.N, MissingDays: currentSeries.MissingDays, MinSamples: minSamples, FormulaRef: formulaRef, Assumptions: assumptions, Boundaries: trend.Boundaries}}, args.IncludeFull, version, debugMetadata, analyzeTrendName, unitSystem, shapeCfg)
 	}
+}
+
+func cloneAnalyzerAssumptions(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func analyzeTrendInputSchema() map[string]any {

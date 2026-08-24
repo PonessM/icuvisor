@@ -6,21 +6,21 @@
       "type": "string"
     },
     "end_date": {
-      "description": "local end date as YYYY-MM-DD in the athlete timezone.",
+      "description": "Inclusive upper bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD.",
       "type": "string"
     },
     "include_full": {
       "default": false,
-      "description": "When true, include raw upstream summary rows.",
+      "description": "When true, include raw upstream weekly rows selected by anchor date; exact partial-week values remain unavailable.",
       "type": "boolean"
     },
     "include_per_sport_load_trends": {
       "default": false,
-      "description": "When true, include computed per-sport CTL/ATL/TSB-style load trend estimates for running, cycling, swimming, and other from athlete-summary byCategory training_load. Existing combined fitness rows remain unchanged.",
+      "description": "When true, fetch an 84-day weekly-summary lookback and return explicit unavailable metadata for per-sport CTL/ATL/TSB; weekly category load is not distributed into invented daily samples.",
       "type": "boolean"
     },
     "start_date": {
-      "description": "local start date for fitness rows as YYYY-MM-DD in the athlete timezone.",
+      "description": "Inclusive lower bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD.",
       "type": "string"
     }
   },

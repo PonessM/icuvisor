@@ -1164,7 +1164,7 @@
   },
   "compute_load_balance": {
     "name": "compute_load_balance",
-    "description": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat.",
+    "description": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
     "arguments": [
       {
         "name": "end_date",
@@ -1291,7 +1291,7 @@
   },
   "compute_zone_time": {
     "name": "compute_zone_time",
-    "description": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat.",
+    "description": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
     "arguments": [
       {
         "name": "end_date",
@@ -2321,33 +2321,33 @@
   },
   "get_fitness": {
     "name": "get_fitness",
-    "description": "Get CTL, ATL, and TSB fitness trends for a local date range.",
+    "description": "Get upstream weekly CTL, ATL, and TSB buckets by inclusive athlete-local anchor date; exact partial-week values cannot be derived.",
     "arguments": [
       {
         "name": "end_date",
         "required": true,
         "type": "string",
-        "description": "local end date as YYYY-MM-DD in the athlete timezone."
+        "description": "Inclusive upper bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."
       },
       {
         "name": "include_full",
         "required": false,
         "type": "boolean",
-        "description": "When true, include raw upstream summary rows.",
+        "description": "When true, include raw upstream weekly rows selected by anchor date; exact partial-week values remain unavailable.",
         "default": false
       },
       {
         "name": "include_per_sport_load_trends",
         "required": false,
         "type": "boolean",
-        "description": "When true, include computed per-sport CTL/ATL/TSB-style load trend estimates for running, cycling, swimming, and other from athlete-summary byCategory training_load. Existing combined fitness rows remain unchanged.",
+        "description": "When true, fetch an 84-day weekly-summary lookback and return explicit unavailable metadata for per-sport CTL/ATL/TSB; weekly category load is not distributed into invented daily samples.",
         "default": false
       },
       {
         "name": "start_date",
         "required": true,
         "type": "string",
-        "description": "local start date for fitness rows as YYYY-MM-DD in the athlete timezone."
+        "description": "Inclusive lower bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."
       }
     ]
   },
@@ -2690,26 +2690,26 @@
   },
   "get_training_summary": {
     "name": "get_training_summary",
-    "description": "Get aggregated training volume, neutral training load, sRPE, and upstream zone-order totals for a local date range.",
+    "description": "Get training volume, neutral load, sRPE, and upstream zone-order totals from weekly buckets by inclusive athlete-local anchor date; exact partial-week totals cannot be derived.",
     "arguments": [
       {
         "name": "end_date",
         "required": true,
         "type": "string",
-        "description": "local end date as YYYY-MM-DD in the athlete timezone."
+        "description": "Inclusive upper bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."
       },
       {
         "name": "include_full",
         "required": false,
         "type": "boolean",
-        "description": "When true, include raw upstream summary rows.",
+        "description": "When true, include raw upstream weekly rows selected by anchor date; exact partial-week values remain unavailable.",
         "default": false
       },
       {
         "name": "start_date",
         "required": true,
         "type": "string",
-        "description": "local start date for summary rows as YYYY-MM-DD in the athlete timezone."
+        "description": "Inclusive lower bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."
       }
     ]
   },

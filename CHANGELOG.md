@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Typed athlete-summary tools now exclude weekly bucket anchors outside their requested inclusive athlete-local windows, while strict raw analyzers retain invalid and out-of-window evidence. Summary-backed analyzers report weekly-anchor coverage instead of calendar-day missingness, and `get_fitness` omits unsupported per-sport daily CTL/ATL/TSB estimates rather than distributing weekly load with false precision.
 - Athlete-summary-backed tools now enforce target-athlete row isolation before shaping or aggregation, including full and strict raw response paths.
 - `get_athlete_profile` now exposes exact upstream power-zone percentage ceilings alongside FTP-derived watt ceilings, with explicit field semantics and readiness diagnostics.
 - `get_activity_histogram` now converts intervals.icu power-zone percentage ceilings to FTP-derived watt boundaries, so power samples are assigned to the correctly named configured zone.

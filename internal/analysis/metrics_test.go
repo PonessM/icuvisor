@@ -161,10 +161,10 @@ func TestMetricMetadataHelpers(t *testing.T) {
 		})
 	}
 
-	assertSource(t, "ctl", SourceFitnessDaily, GrainDaily, KindScalar)
+	assertSource(t, "ctl", SourceFamily("fitness_weekly"), Grain("weekly"), KindScalar)
 	assertSource(t, "ctl", SourceWellnessDaily, GrainDaily, KindScalar)
 	assertSource(t, "training_load", SourceActivityRow, GrainActivity, KindScalar)
-	assertSource(t, "training_load", SourceTrainingSummary, GrainSummaryWindow, KindScalar)
+	assertSource(t, "training_load", SourceTrainingSummary, Grain("weekly"), KindScalar)
 	assertSource(t, "training_load", SourceExtendedActivity, GrainActivity, KindScalar)
 	assertSource(t, "training_load", SourceExtendedInterval, GrainInterval, KindScalar)
 	assertSource(t, "feel", SourceWellnessDaily, GrainDaily, KindSubjectiveScale)
@@ -176,7 +176,7 @@ func TestMetricMetadataHelpers(t *testing.T) {
 			t.Fatalf("MetricSources(%q) length = %d, want 1", metric, len(sources))
 		}
 		source := sources[0]
-		if source.Kind != KindDerived || source.Family != SourceDerivedWeekly || source.UnitLabel == "" || source.Method == "" {
+		if source.Kind != KindDerived || source.Family != SourceTrainingSummary || source.Grain != Grain("weekly") || source.UnitLabel == "" || source.Method == "" {
 			t.Fatalf("derived source for %q = %+v", metric, source)
 		}
 	}

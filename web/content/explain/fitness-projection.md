@@ -32,11 +32,11 @@ hypoxic-stress model. Use HR, RPE, feel, and recovery trends as supporting
 context; do not inflate CTL/ATL/Form unless the logged `training_load` itself was
 changed upstream.
 
-## Per-sport load trends are a context aid
+## Per-sport fitness trends are unavailable from weekly buckets
 
-For runners, cyclists, swimmers, and triathletes, a single combined load can hide divergent sport fatigue. [`get_fitness`]({{< relref "/reference/tools#get_fitness" >}}) therefore has an opt-in `include_per_sport_load_trends: true` view that computes running, cycling, swimming, and other load trends from visible `byCategory[].training_load` in the athlete summary.
+For runners, cyclists, swimmers, and triathletes, a single combined load can hide discipline differences. But the visible `byCategory[].training_load` values are upstream weekly bucket totals, not daily samples. [`get_fitness`]({{< relref "/reference/tools#get_fitness" >}}) therefore does not distribute them across days or compute per-sport CTL/ATL/TSB. With `include_per_sport_load_trends: true`, it preserves the 84-day summary lookback but returns explicit unavailable metadata and the reason `weekly_summary_cannot_be_distributed_daily`.
 
-Those per-sport CTL/ATL/TSB-style values are warmed estimates, not upstream-native per-sport fitness fields. They are useful for questions like "is my run load rising while bike load is flat?" or "am I carrying swim fatigue into a run block?" They should not replace the combined upstream CTL/ATL/TSB when judging global form, fatigue, or race-day freshness. If category data is missing or the warm-up history is short, the response includes caveats in `_meta.per_sport_load_trends.caveats`; quote those caveats instead of treating the per-sport numbers as precise physiology.
+Use the combined upstream weekly CTL/ATL/TSB anchors for global fitness/form context. For discipline context, [`get_training_summary`]({{< relref "/reference/tools#get_training_summary" >}}) can expose factual weekly sport/category totals when present. Preserve its inclusive anchor-window and partial-week caveats, and do not relabel those totals as per-sport CTL, ATL, TSB, fatigue, daily load, or precise physiology.
 
 ## The assumptions are part of the answer
 

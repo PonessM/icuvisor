@@ -51,24 +51,15 @@ func TestGetFitnessPerSportLoadTrends(t *testing.T) {
 	if len(client.summaryCalls) != 1 || client.summaryCalls[0].Start != "2026-02-06" || client.summaryCalls[0].End != "2026-05-02" {
 		t.Fatalf("summary calls = %#v", client.summaryCalls)
 	}
-	buckets := perSportBuckets(t, got)
-	assertTrendLoad(t, buckets, "running", "2026-05-01", 40)
-	assertTrendLoad(t, buckets, "cycling", "2026-05-02", 100)
-	assertTrendLoad(t, buckets, "swimming", "2026-05-02", 35)
-	assertTrendLoad(t, buckets, "other", "2026-05-01", 15)
-	assertTrendValue(t, buckets, "running", "2026-05-01", "ctl", 0.952)
-	assertTrendValue(t, buckets, "running", "2026-05-01", "atl", 5.714)
-	assertTrendValue(t, buckets, "running", "2026-05-01", "tsb", -4.762)
-	if sumTrendLoadForDate(buckets, "2026-05-02") != 135 {
-		t.Fatalf("per-sport load sum on 2026-05-02 = %v, want 135", sumTrendLoadForDate(buckets, "2026-05-02"))
+	if _, ok := got["per_sport_load_trends"]; ok {
+		t.Fatalf("response invented per-sport daily trend rows: %#v", got["per_sport_load_trends"])
 	}
 	meta := got["_meta"].(map[string]any)["per_sport_load_trends"].(map[string]any)
-	if meta["method"] != perSportLoadTrendMethod || meta["warmup_summary_days_available"].(float64) != 0 {
-		t.Fatalf("per-sport meta = %#v", meta)
+	if meta["status"] != "unavailable" || meta["reason"] != "weekly_summary_cannot_be_distributed_daily" || meta["warmup_summary_anchors_available"] != float64(0) {
+		t.Fatalf("per-sport meta = %#v, want explicit unavailable result", meta)
 	}
-	categories := meta["source_categories_by_bucket"].(map[string]any)
-	if !anySliceContains(categories["running"].([]any), "Trail Run") || !anySliceContains(categories["cycling"].([]any), "Indoor Cycling") || !anySliceContains(categories["cycling"].([]any), "MTB") || !anySliceContains(categories["swimming"].([]any), "Open Water Swim") {
-		t.Fatalf("source categories = %#v", categories)
+	if !strings.Contains(joinedStrings(meta["caveats"].([]any)), "No product-authorized weekly-to-daily distribution model") {
+		t.Fatalf("per-sport caveats = %#v", meta["caveats"])
 	}
 }
 
@@ -87,18 +78,12 @@ func TestGetFitnessPerSportLoadTrendCaveatsAndDateGaps(t *testing.T) {
 		t.Fatalf("Handler() error = %v", err)
 	}
 	got := resultMap(t, result)
-	buckets := perSportBuckets(t, got)
-	if len(buckets["running"]) != 3 {
-		t.Fatalf("running trend rows = %#v, want every requested date", buckets["running"])
+	if _, ok := got["per_sport_load_trends"]; ok {
+		t.Fatalf("response invented per-sport daily trend rows: %#v", got["per_sport_load_trends"])
 	}
-	assertTrendLoad(t, buckets, "running", "2026-05-02", 0)
 	meta := got["_meta"].(map[string]any)["per_sport_load_trends"].(map[string]any)
-	missing := meta["missing_requested_dates"].([]any)
-	if len(missing) != 1 || missing[0] != "2026-05-02" {
-		t.Fatalf("missing_requested_dates = %#v", missing)
-	}
 	caveats := joinedStrings(meta["caveats"].([]any))
-	for _, want := range []string{"no byCategory sport breakdown", "omit training_load", "totals differ", "absent from upstream summary rows", "fewer than 84 warm-up", "no non-zero per-sport category load"} {
+	for _, want := range []string{"weekly bucket", "No product-authorized weekly-to-daily distribution model"} {
 		if !strings.Contains(caveats, want) {
 			t.Fatalf("caveats %q missing %q", caveats, want)
 		}
@@ -129,77 +114,15 @@ func TestGetFitnessPreservesTRIMPLoadAndOmitsMissingFitnessFields(t *testing.T) 
 	if second["ctl"] != float64(0) || second["atl"] != float64(0) || second["tsb"] != float64(0) {
 		t.Fatalf("second fitness row = %#v, want explicit zero fitness values preserved", second)
 	}
-	buckets := perSportBuckets(t, got)
-	assertTrendLoad(t, buckets, "running", "2026-05-01", 42)
 	meta := got["_meta"].(map[string]any)
 	diagnostics := meta["load_diagnostics"].([]any)
 	if !diagnosticReasonsContain(diagnostics, "trimp_or_hr_load_available") || !diagnosticReasonsContain(diagnostics, "fitness_fields_missing") {
 		t.Fatalf("load_diagnostics = %#v, want TRIMP and missing-fitness diagnostics", diagnostics)
 	}
 	trendMeta := meta["per_sport_load_trends"].(map[string]any)
-	if !strings.Contains(joinedStrings(trendMeta["caveats"].([]any)), "do not relabel it as TSS") {
-		t.Fatalf("per-sport caveats = %#v, want TRIMP/TSS wording", trendMeta["caveats"])
+	if trendMeta["status"] != "unavailable" || trendMeta["reason"] != "weekly_summary_cannot_be_distributed_daily" {
+		t.Fatalf("per-sport metadata = %#v, want unavailable weekly summary", trendMeta)
 	}
-}
-
-func perSportBuckets(t *testing.T, got map[string]any) map[string][]map[string]any {
-	t.Helper()
-	out := map[string][]map[string]any{}
-	for _, bucketRaw := range got["per_sport_load_trends"].([]any) {
-		bucket := bucketRaw.(map[string]any)
-		for _, rowRaw := range bucket["rows"].([]any) {
-			out[bucket["sport"].(string)] = append(out[bucket["sport"].(string)], rowRaw.(map[string]any))
-		}
-	}
-	return out
-}
-
-func trendRow(t *testing.T, buckets map[string][]map[string]any, sport string, date string) map[string]any {
-	t.Helper()
-	for _, row := range buckets[sport] {
-		if row["date"] == date {
-			return row
-		}
-	}
-	t.Fatalf("missing trend row for %s %s in %#v", sport, date, buckets[sport])
-	return nil
-}
-
-func assertTrendLoad(t *testing.T, buckets map[string][]map[string]any, sport string, date string, want float64) {
-	t.Helper()
-	got := trendRow(t, buckets, sport, date)["training_load"].(float64)
-	if got != want {
-		t.Fatalf("%s %s training_load = %v, want %v", sport, date, got, want)
-	}
-}
-
-func assertTrendValue(t *testing.T, buckets map[string][]map[string]any, sport string, date string, field string, want float64) {
-	t.Helper()
-	got := trendRow(t, buckets, sport, date)[field].(float64)
-	if got != want {
-		t.Fatalf("%s %s %s = %v, want %v", sport, date, field, got, want)
-	}
-}
-
-func sumTrendLoadForDate(buckets map[string][]map[string]any, date string) float64 {
-	var sum float64
-	for sport := range buckets {
-		for _, row := range buckets[sport] {
-			if row["date"] == date {
-				sum += row["training_load"].(float64)
-			}
-		}
-	}
-	return sum
-}
-
-func anySliceContains(values []any, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func joinedStrings(values []any) string {

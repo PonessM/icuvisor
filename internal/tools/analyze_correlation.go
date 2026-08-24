@@ -112,9 +112,25 @@ func analyzeCorrelationHandler(clients analyzerClients, profileClient ProfileCli
 			pairs = pairDailySamples(xSeries, ySeries, window, args.LagDays)
 		}
 		result := analysis.ComputeCorrelation(analysis.CorrelationInput{MetricX: metricX.Name, MetricY: metricY.Name, Method: args.Method, LagDays: args.LagDays, Pairs: pairs})
-		assumptions := analyzerMetaAssumptions(map[string]any{"pairing_grain": string(grain), "lag_days": args.LagDays, "lookup_window_y": yWindow.Window, "anchor_metric": "metric_x", "series": map[string]any{metricX.Name: xSeries.Assumptions, metricY.Name: ySeries.Assumptions}}, window.Window, args.IncludeFull)
-		return encodeAnalyzerResponse(analyzerResponseInput{Result: result, Series: pairs, Meta: analysis.AnalyzerMetaInput{Method: args.Method + "_correlation", SourceTools: mergeSourceTools(xSeries, ySeries), N: result.N, MissingDays: analysis.MissingSamples(window.Days, result.N), MinSamples: analysis.MinCorrelationSamples, Assumptions: assumptions, Boundaries: result.Boundaries}}, args.IncludeFull, version, debugMetadata, analyzeCorrelationName, unitSystem, shapeCfg)
+		pairingGrain := grain
+		missingDays := analysis.MissingSamples(window.Days, result.N)
+		assumptionInput := map[string]any{"pairing_grain": string(pairingGrain), "lag_days": args.LagDays, "lookup_window_y": yWindow.Window, "anchor_metric": "metric_x", "series": map[string]any{metricX.Name: xSeries.Assumptions, metricY.Name: ySeries.Assumptions}}
+		if seriesUsesWeeklyAnchors(xSeries) || seriesUsesWeeklyAnchors(ySeries) {
+			pairingGrain = analysis.SampleGrainWeekly
+			missingDays = 0
+			expected := len(expectedWeeklyAnchorDates(window))
+			assumptionInput["pairing_grain"] = string(pairingGrain)
+			assumptionInput["expected_weekly_anchors"] = expected
+			assumptionInput["missing_weekly_anchors"] = max(0, expected-result.N)
+			assumptionInput["missing_days_applicable"] = false
+		}
+		assumptions := analyzerMetaAssumptions(assumptionInput, window.Window, args.IncludeFull)
+		return encodeAnalyzerResponse(analyzerResponseInput{Result: result, Series: pairs, Meta: analysis.AnalyzerMetaInput{Method: args.Method + "_correlation", SourceTools: mergeSourceTools(xSeries, ySeries), N: result.N, MissingDays: missingDays, MinSamples: analysis.MinCorrelationSamples, Assumptions: assumptions, Boundaries: result.Boundaries}}, args.IncludeFull, version, debugMetadata, analyzeCorrelationName, unitSystem, shapeCfg)
 	}
+}
+
+func seriesUsesWeeklyAnchors(series analyzerSampleSeries) bool {
+	return series.Assumptions["sample_grain"] == string(analysis.SampleGrainWeekly)
 }
 
 type correlationMetricRef struct {

@@ -30,11 +30,11 @@ func TestAggregateActivityDayDerivesPaceFromTotalDistanceAndTime(t *testing.T) {
 
 func TestLoadAnalyzerSeriesLoadsDerivedWeeklyMetrics(t *testing.T) {
 	client := &fakeFitnessMetricsClient{summaries: decodeSummaries(t, `[
-		{"date":"2026-05-01","training_load":10,"time":3600},
-		{"date":"2026-05-02","training_load":20,"time":7200},
-		{"date":"2026-05-15","training_load":30,"time":1800}
+		{"date":"2026-05-04","training_load":10,"time":3600},
+		{"date":"2026-05-11","training_load":20,"time":7200},
+		{"date":"2026-05-18","training_load":30,"time":1800}
 	]`)}
-	window, err := analysis.ParseWindow(analysis.Window{StartDate: "2026-05-01", EndDate: "2026-05-21"}, 366)
+	window, err := analysis.ParseWindow(analysis.Window{StartDate: "2026-05-01", EndDate: "2026-05-24"}, 366)
 	if err != nil {
 		t.Fatalf("parse window: %v", err)
 	}
@@ -42,11 +42,117 @@ func TestLoadAnalyzerSeriesLoadsDerivedWeeklyMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load weekly series: %v", err)
 	}
-	if len(series.Samples) != 2 || series.Samples[0].Bucket != 0 || series.Samples[0].Value != 30 || series.Samples[1].Bucket != 2 || series.Samples[1].Value != 30 {
+	if len(series.Samples) != 3 || series.Samples[0].Value != 10 || series.Samples[1].Value != 20 || series.Samples[2].Value != 30 {
 		t.Fatalf("weekly samples = %#v", series.Samples)
 	}
-	if series.MissingDays != 18 || series.Assumptions["sample_grain"] != string(analysis.SampleGrainWeekly) {
+	if series.MissingDays != 0 || series.Assumptions["sample_grain"] != string(analysis.SampleGrainWeekly) || series.Assumptions["expected_weekly_anchors"] != 3 || series.Assumptions["missing_weekly_anchors"] != 0 {
 		t.Fatalf("weekly metadata missing=%d assumptions=%#v", series.MissingDays, series.Assumptions)
+	}
+}
+
+func TestLoadAnalyzerSeriesTreatsFitnessAsWeeklyAnchors(t *testing.T) {
+	client := &fakeFitnessMetricsClient{summaries: decodeSummaries(t, `[
+		{"date":"2026-05-04","fitness":60},
+		{"date":"2026-05-11","fitness":61}
+	]`)}
+	window, err := analysis.ParseWindow(analysis.Window{StartDate: "2026-05-04", EndDate: "2026-05-17"}, 366)
+	if err != nil {
+		t.Fatalf("parse window: %v", err)
+	}
+	series, err := loadAnalyzerSeries(context.Background(), analyzerClients{fitness: client}, analysis.Metric("ctl"), window, analysis.SampleGrainDaily, "", response.UnitSystemMetric, nil, true)
+	if err != nil {
+		t.Fatalf("load CTL series: %v", err)
+	}
+	if len(series.Samples) != 2 || series.MissingDays != 0 || series.Assumptions["sample_grain"] != string(analysis.SampleGrainWeekly) {
+		t.Fatalf("fitness weekly series = %#v missing=%d assumptions=%#v", series.Samples, series.MissingDays, series.Assumptions)
+	}
+	if series.Assumptions["expected_weekly_anchors"] != 2 || series.Assumptions["missing_weekly_anchors"] != 0 || series.Assumptions["aggregation"] != "upstream_weekly_anchor_value" {
+		t.Fatalf("fitness weekly assumptions = %#v", series.Assumptions)
+	}
+}
+
+func TestSummaryBackedAnalyzerOutputsUseWeeklyAnchorCoverage(t *testing.T) {
+	client := newFakeFitnessMetricsClient(t)
+	client.summaries = decodeSummaries(t, `[
+		{"date":"2026-05-04","fitness":60,"fatigue":55},
+		{"date":"2026-05-11","fitness":61,"fatigue":56},
+		{"date":"2026-05-18","fitness":63,"fatigue":58}
+	]`)
+	tests := []struct {
+		name   string
+		tool   Tool
+		args   json.RawMessage
+		assert func(*testing.T, map[string]any)
+	}{
+		{
+			name: "correlation",
+			tool: newAnalyzeCorrelationTool(client, nil, nil, client, "test", "UTC", false),
+			args: json.RawMessage(`{"metric_x":"ctl","metric_y":"atl","window":{"start_date":"2026-05-04","end_date":"2026-05-24"},"include_full":true}`),
+			assert: func(t *testing.T, got map[string]any) {
+				if got["result"].(map[string]any)["n"] != float64(3) {
+					t.Fatalf("correlation result = %#v", got["result"])
+				}
+			},
+		},
+		{
+			name: "distribution",
+			tool: newAnalyzeDistributionTool(client, nil, nil, client, "test", "UTC", false),
+			args: json.RawMessage(`{"metric":"ctl","window":{"start_date":"2026-05-04","end_date":"2026-05-24"},"include_full":true}`),
+			assert: func(t *testing.T, got map[string]any) {
+				if got["result"].(map[string]any)["sample_grain"] != "weekly" {
+					t.Fatalf("distribution result = %#v, want weekly grain", got["result"])
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tc.tool.Handler(context.Background(), Request{Name: tc.tool.Name, Arguments: tc.args})
+			if err != nil {
+				t.Fatalf("Handler() error = %v", err)
+			}
+			got := resultMap(t, result)
+			tc.assert(t, got)
+			meta := got["_meta"].(map[string]any)
+			if meta["missing_days"] != float64(0) {
+				t.Fatalf("metadata = %#v, weekly anchors must not report calendar-day missingness", meta)
+			}
+			assumptions := meta["assumptions"].(map[string]any)
+			if tc.name == "correlation" {
+				if assumptions["pairing_grain"] != "weekly" || assumptions["expected_weekly_anchors"] != float64(3) || assumptions["missing_weekly_anchors"] != float64(0) {
+					t.Fatalf("correlation assumptions = %#v", assumptions)
+				}
+			} else if assumptions["sample_grain"] != "weekly" || assumptions["expected_weekly_anchors"] != float64(3) || assumptions["missing_weekly_anchors"] != float64(0) {
+				t.Fatalf("distribution assumptions = %#v", assumptions)
+			}
+		})
+	}
+}
+
+func TestAnalyzeTrendSeparatesCurrentAndBaselineWeeklyAnchorCoverage(t *testing.T) {
+	client := newFakeFitnessMetricsClient(t)
+	client.summaries = decodeSummaries(t, `[
+		{"date":"2026-05-04","fitness":50},
+		{"date":"2026-05-11","fitness":51},
+		{"date":"2026-05-25","fitness":53},
+		{"date":"2026-06-01","fitness":54},
+		{"date":"2026-06-08","fitness":55},
+		{"date":"2026-06-15","fitness":56},
+		{"date":"2026-06-22","fitness":57}
+	]`)
+	tool := newAnalyzeTrendTool(client, nil, nil, client, "test", "UTC", false)
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"metric":"ctl","window":{"start_date":"2026-06-01","end_date":"2026-06-28"},"baseline_window":{"start_date":"2026-05-04","end_date":"2026-05-31"},"rolling_window_days":7}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	assumptions := resultMap(t, result)["_meta"].(map[string]any)["assumptions"].(map[string]any)
+	current, ok := assumptions["current_series"].(map[string]any)
+	if !ok || current["expected_weekly_anchors"] != float64(4) || current["missing_weekly_anchors"] != float64(0) {
+		t.Fatalf("current_series = %#v, want complete four-anchor coverage", assumptions["current_series"])
+	}
+	baseline, ok := assumptions["baseline_series"].(map[string]any)
+	if !ok || baseline["expected_weekly_anchors"] != float64(4) || baseline["missing_weekly_anchors"] != float64(1) {
+		t.Fatalf("baseline_series = %#v, want one missing baseline anchor", assumptions["baseline_series"])
 	}
 }
 
@@ -54,19 +160,19 @@ func TestAnalyzeCorrelationSupportsVO2MaxLikeCustomFieldAgainstCTL(t *testing.T)
 	t.Parallel()
 
 	fitness := &fakeFitnessMetricsClient{summaries: decodeSummaries(t, `[
-		{"date":"2026-05-01","fitness":60},
-		{"date":"2026-05-02","fitness":61},
-		{"date":"2026-05-03","fitness":63}
+		{"date":"2026-05-04","fitness":60},
+		{"date":"2026-05-11","fitness":61},
+		{"date":"2026-05-18","fitness":63}
 	]`)}
 	activities := newFakeActivitiesClient(t, []string{
-		`{"id":"a1","name":"Ride 1","type":"Ride","start_date_local":"2026-05-01T07:00:00","moving_time":3600,"vo2max_est":51.2}`,
-		`{"id":"a2","name":"Ride 2","type":"Ride","start_date_local":"2026-05-02T07:00:00","moving_time":4200,"vo2max_est":52.1}`,
-		`{"id":"a3","name":"Ride 3","type":"Ride","start_date_local":"2026-05-03T07:00:00","moving_time":3900,"vo2max_est":53.0}`,
+		`{"id":"a1","name":"Ride 1","type":"Ride","start_date_local":"2026-05-04T07:00:00","moving_time":3600,"vo2max_est":51.2}`,
+		`{"id":"a2","name":"Ride 2","type":"Ride","start_date_local":"2026-05-11T07:00:00","moving_time":4200,"vo2max_est":52.1}`,
+		`{"id":"a3","name":"Ride 3","type":"Ride","start_date_local":"2026-05-18T07:00:00","moving_time":3900,"vo2max_est":53.0}`,
 	}, "metric")
 	activities.customItems = decodeCustomItems(t, `{"id":"c1","type":"ACTIVITY_FIELD","content":{"field":"vo2max_est"}}`)
 	tool := newAnalyzeCorrelationTool(fitness, nil, activities, activities, "test", "UTC", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"metric_x":"custom:vo2max_est","metric_y":"ctl","window":{"start_date":"2026-05-01","end_date":"2026-05-03"},"custom_fields":["vo2max_est"],"include_full":true}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"metric_x":"custom:vo2max_est","metric_y":"ctl","window":{"start_date":"2026-05-04","end_date":"2026-05-24"},"custom_fields":["vo2max_est"],"include_full":true}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}

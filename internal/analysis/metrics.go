@@ -14,8 +14,8 @@ type Metric string
 type SourceFamily string
 
 const (
-	// SourceFitnessDaily identifies daily rows returned by get_fitness.
-	SourceFitnessDaily SourceFamily = "fitness_daily"
+	// SourceFitnessWeekly identifies weekly anchor rows returned by get_fitness.
+	SourceFitnessWeekly SourceFamily = "fitness_weekly"
 	// SourceWellnessDaily identifies daily rows returned by get_wellness_data.
 	SourceWellnessDaily SourceFamily = "wellness_daily"
 	// SourceActivityRow identifies activity rows returned by get_activities/get_activity_details.
@@ -28,8 +28,6 @@ const (
 	SourceExtendedActivity SourceFamily = "extended_activity"
 	// SourceExtendedInterval identifies interval metrics returned by get_extended_metrics.
 	SourceExtendedInterval SourceFamily = "extended_interval"
-	// SourceDerivedWeekly identifies analyzer-level weekly aggregates derived from read tools.
-	SourceDerivedWeekly SourceFamily = "derived_weekly"
 )
 
 // Grain describes the row/window grain for a metric source.
@@ -42,10 +40,8 @@ const (
 	GrainActivity Grain = "activity"
 	// GrainInterval is one value per activity interval.
 	GrainInterval Grain = "interval"
-	// GrainSummaryWindow is one value per summary query window.
-	GrainSummaryWindow Grain = "summary_window"
-	// GrainDerivedWeekly is one value per analyzer-created week bucket.
-	GrainDerivedWeekly Grain = "derived_weekly"
+	// GrainWeekly is one upstream value per weekly anchor.
+	GrainWeekly Grain = "weekly"
 )
 
 // MetricKind classifies how analyzer tools should treat a metric source.
@@ -155,9 +151,9 @@ type metricEntry struct {
 }
 
 var metricCatalog = []metricEntry{
-	metric("ctl", src(SourceFitnessDaily, "get_fitness", "ctl", GrainDaily, "CTL"), src(SourceWellnessDaily, "get_wellness_data", "ctl", GrainDaily, "CTL")),
-	metric("atl", src(SourceFitnessDaily, "get_fitness", "atl", GrainDaily, "ATL"), src(SourceWellnessDaily, "get_wellness_data", "atl", GrainDaily, "ATL")),
-	metric("tsb", src(SourceFitnessDaily, "get_fitness", "tsb", GrainDaily, "TSB")),
+	metric("ctl", src(SourceFitnessWeekly, "get_fitness", "ctl", GrainWeekly, "CTL"), src(SourceWellnessDaily, "get_wellness_data", "ctl", GrainDaily, "CTL")),
+	metric("atl", src(SourceFitnessWeekly, "get_fitness", "atl", GrainWeekly, "ATL"), src(SourceWellnessDaily, "get_wellness_data", "atl", GrainDaily, "ATL")),
+	metric("tsb", src(SourceFitnessWeekly, "get_fitness", "tsb", GrainWeekly, "TSB")),
 	metric("ramp", src(SourceWellnessDaily, "get_wellness_data", "rampRate", GrainDaily, "CTL/week")),
 	metric("ctl_load", src(SourceWellnessDaily, "get_wellness_data", "ctlLoad", GrainDaily, "load")),
 	metric("atl_load", src(SourceWellnessDaily, "get_wellness_data", "atlLoad", GrainDaily, "load")),
@@ -193,12 +189,12 @@ var metricCatalog = []metricEntry{
 	metric("carbohydrates", src(SourceWellnessDaily, "get_wellness_data", "carbohydrates", GrainDaily, "g")),
 	metric("protein", src(SourceWellnessDaily, "get_wellness_data", "protein", GrainDaily, "g")),
 	metric("fat_total", src(SourceWellnessDaily, "get_wellness_data", "fatTotal", GrainDaily, "g")),
-	metric("moving_time_seconds", src(SourceActivityRow, "get_activities", "moving_time_seconds", GrainActivity, "seconds"), src(SourceTrainingSummary, "get_training_summary", "moving_time_seconds", GrainSummaryWindow, "seconds")),
-	metric("elapsed_time_seconds", src(SourceActivityRow, "get_activities", "elapsed_time_seconds", GrainActivity, "seconds"), src(SourceTrainingSummary, "get_training_summary", "elapsed_time_seconds", GrainSummaryWindow, "seconds")),
+	metric("moving_time_seconds", src(SourceActivityRow, "get_activities", "moving_time_seconds", GrainActivity, "seconds"), src(SourceTrainingSummary, "get_training_summary", "moving_time_seconds", GrainWeekly, "seconds")),
+	metric("elapsed_time_seconds", src(SourceActivityRow, "get_activities", "elapsed_time_seconds", GrainActivity, "seconds"), src(SourceTrainingSummary, "get_training_summary", "elapsed_time_seconds", GrainWeekly, "seconds")),
 	metric("duration_seconds", src(SourceActivityInterval, "get_activity_intervals", "duration_seconds", GrainInterval, "seconds")),
-	metric("time_seconds", src(SourceTrainingSummary, "get_training_summary", "time_seconds", GrainSummaryWindow, "seconds")),
-	metric("distance_km", src(SourceActivityRow, "get_activities", "distance_km", GrainActivity, "km"), src(SourceTrainingSummary, "get_training_summary", "distance_km", GrainSummaryWindow, "km")),
-	metric("distance_mi", src(SourceActivityRow, "get_activities", "distance_mi", GrainActivity, "mi"), src(SourceTrainingSummary, "get_training_summary", "distance_mi", GrainSummaryWindow, "mi")),
+	metric("time_seconds", src(SourceTrainingSummary, "get_training_summary", "time_seconds", GrainWeekly, "seconds")),
+	metric("distance_km", src(SourceActivityRow, "get_activities", "distance_km", GrainActivity, "km"), src(SourceTrainingSummary, "get_training_summary", "distance_km", GrainWeekly, "km")),
+	metric("distance_mi", src(SourceActivityRow, "get_activities", "distance_mi", GrainActivity, "mi"), src(SourceTrainingSummary, "get_training_summary", "distance_mi", GrainWeekly, "mi")),
 	metric("distance_m", src(SourceActivityInterval, "get_activity_intervals", "distance_m", GrainInterval, "m")),
 	metric("pace_seconds_per_km", src(SourceActivityRow, "get_activities", "pace_seconds_per_km", GrainActivity, "s/km")),
 	metric("pace_seconds_per_mile", src(SourceActivityRow, "get_activities", "pace_seconds_per_mile", GrainActivity, "s/mi")),
@@ -206,18 +202,18 @@ var metricCatalog = []metricEntry{
 	metric("average_speed_mph", src(SourceActivityRow, "get_activities", "average_speed_mph", GrainActivity, "mph")),
 	metric("max_speed_kmh", src(SourceActivityRow, "get_activities", "max_speed_kmh", GrainActivity, "km/h")),
 	metric("max_speed_mph", src(SourceActivityRow, "get_activities", "max_speed_mph", GrainActivity, "mph")),
-	metric("elevation_gain_m", src(SourceActivityRow, "get_activities", "elevation_gain_m", GrainActivity, "m"), src(SourceTrainingSummary, "get_training_summary", "elevation_gain_m", GrainSummaryWindow, "m")),
+	metric("elevation_gain_m", src(SourceActivityRow, "get_activities", "elevation_gain_m", GrainActivity, "m"), src(SourceTrainingSummary, "get_training_summary", "elevation_gain_m", GrainWeekly, "m")),
 	metric("elevation_loss_m", src(SourceActivityRow, "get_activities", "elevation_loss_m", GrainActivity, "m")),
-	metric("training_load", src(SourceActivityRow, "get_activities", "training_load", GrainActivity, "load"), src(SourceTrainingSummary, "get_training_summary", "training_load", GrainSummaryWindow, "load"), src(SourceExtendedActivity, "get_extended_metrics", "training_load", GrainActivity, "load"), src(SourceExtendedInterval, "get_extended_metrics", "training_load", GrainInterval, "load")),
+	metric("training_load", src(SourceActivityRow, "get_activities", "training_load", GrainActivity, "load"), src(SourceTrainingSummary, "get_training_summary", "training_load", GrainWeekly, "load"), src(SourceExtendedActivity, "get_extended_metrics", "training_load", GrainActivity, "load"), src(SourceExtendedInterval, "get_extended_metrics", "training_load", GrainInterval, "load")),
 	metric("average_heart_rate_bpm", src(SourceActivityRow, "get_activities", "average_heart_rate_bpm", GrainActivity, "bpm"), src(SourceActivityInterval, "get_activity_intervals", "average_heart_rate_bpm", GrainInterval, "bpm")),
 	metric("max_heart_rate_bpm", src(SourceActivityRow, "get_activities", "max_heart_rate_bpm", GrainActivity, "bpm")),
 	metric("average_cadence_rpm", src(SourceActivityRow, "get_activities", "average_cadence_rpm", GrainActivity, "rpm")),
-	metric("calories_burned", src(SourceActivityRow, "get_activities", "calories_burned", GrainActivity, "kcal"), src(SourceTrainingSummary, "get_training_summary", "calories_burned", GrainSummaryWindow, "kcal")),
+	metric("calories_burned", src(SourceActivityRow, "get_activities", "calories_burned", GrainActivity, "kcal"), src(SourceTrainingSummary, "get_training_summary", "calories_burned", GrainWeekly, "kcal")),
 	metric("average_power_watts", src(SourceActivityRow, "get_activities", "average_power_watts", GrainActivity, "W"), src(SourceActivityInterval, "get_activity_intervals", "average_power_watts", GrainInterval, "W")),
-	metric("session_rpe", src(SourceTrainingSummary, "get_training_summary", "session_rpe", GrainSummaryWindow, "RPE"), src(SourceExtendedActivity, "get_extended_metrics", "session_rpe", GrainActivity, "RPE")),
-	metric("time_in_zones_total_seconds", src(SourceTrainingSummary, "get_training_summary", "time_in_zones_total_seconds", GrainSummaryWindow, "seconds")),
-	derivedMetric("weekly_tss", "get_training_summary", "training_load", "TSS-equivalent", "weekly bucketed sum of training_load"),
-	derivedMetric("weekly_hours", "get_training_summary", "time_seconds", "hours", "weekly bucketed time_seconds / 3600"),
+	metric("session_rpe", src(SourceTrainingSummary, "get_training_summary", "session_rpe", GrainWeekly, "RPE"), src(SourceExtendedActivity, "get_extended_metrics", "session_rpe", GrainActivity, "RPE")),
+	metric("time_in_zones_total_seconds", src(SourceTrainingSummary, "get_training_summary", "time_in_zones_total_seconds", GrainWeekly, "seconds")),
+	derivedMetric("weekly_tss", "get_training_summary", "training_load", "TSS-equivalent", "upstream weekly bucket training_load"),
+	derivedMetric("weekly_hours", "get_training_summary", "time_seconds", "hours", "upstream weekly bucket time_seconds / 3600"),
 	metric("stride_length_m", src(SourceExtendedActivity, "get_extended_metrics", "stride_length_m", GrainActivity, "m"), src(SourceExtendedInterval, "get_extended_metrics", "stride_length_m", GrainInterval, "m")),
 	metric("cardiac_decoupling_percent", src(SourceExtendedActivity, "get_extended_metrics", "cardiac_decoupling_percent", GrainActivity, "%")),
 	metric("pw_hr", src(SourceExtendedActivity, "get_extended_metrics", "pw_hr", GrainActivity, "%")),
@@ -254,7 +250,7 @@ func scaleSrc(field string, scale string) MetricSource {
 }
 
 func derivedMetric(value string, tool string, field string, unit string, method string) metricEntry {
-	return metric(value, MetricSource{Family: SourceDerivedWeekly, Tool: tool, Field: field, Grain: GrainDerivedWeekly, Kind: KindDerived, UnitLabel: unit, Method: method})
+	return metric(value, MetricSource{Family: SourceTrainingSummary, Tool: tool, Field: field, Grain: GrainWeekly, Kind: KindDerived, UnitLabel: unit, Method: method})
 }
 
 func buildAliasMap() map[string]Metric {

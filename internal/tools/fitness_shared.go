@@ -17,6 +17,9 @@ import (
 const (
 	invalidFitnessArgumentsMessage = "invalid fitness arguments; provide start_date/end_date as YYYY-MM-DD and optional include_full"
 	invalidCurveArgumentsMessage   = "invalid curve arguments; provide valid dates, sports, and positive bucket values"
+	athleteSummaryGrain            = "upstream_weekly_bucket"
+	athleteSummaryWindowPolicy     = "include_bucket_when_anchor_date_is_within_inclusive_window"
+	athleteSummaryPartialWeekNote  = "exact partial-week totals cannot be derived from athlete-summary buckets"
 )
 
 var defaultDurationBuckets = []int{5, 15, 30, 60, 300, 1200, 3600}
@@ -147,8 +150,12 @@ func encodeShaped(payload any, includeFull bool, rowCollections []string, versio
 
 func roundPtr(value float64) *float64 { rounded := round(value, 3); return &rounded }
 
-func dateRangeInputSchema(startDescription string) map[string]any {
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"start_date", "end_date"}, "properties": map[string]any{"start_date": map[string]any{"type": "string", "description": startDescription + " as YYYY-MM-DD in the athlete timezone."}, "end_date": map[string]any{"type": "string", "description": "local end date as YYYY-MM-DD in the athlete timezone."}, "include_full": map[string]any{"type": "boolean", "default": false, "description": "When true, include raw upstream summary rows."}}}
+func athleteSummaryDateRangeInputSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"start_date", "end_date"}, "properties": map[string]any{
+		"start_date":   map[string]any{"type": "string", "description": "Inclusive lower bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."},
+		"end_date":     map[string]any{"type": "string", "description": "Inclusive upper bound for upstream weekly bucket anchor dates, as athlete-local YYYY-MM-DD."},
+		"include_full": map[string]any{"type": "boolean", "default": false, "description": "When true, include raw upstream weekly rows selected by anchor date; exact partial-week values remain unavailable."},
+	}}
 }
 
 func genericOutputSchema(description string) map[string]any {

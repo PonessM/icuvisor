@@ -68,7 +68,7 @@ func loadAnalyzerSeries(ctx context.Context, clients analyzerClients, metric ana
 		series.Assumptions["scale_label"] = selection.Source.ScaleLabel
 	}
 	switch selection.Source.Family {
-	case analysis.SourceFitnessDaily, analysis.SourceTrainingSummary, analysis.SourceDerivedWeekly:
+	case analysis.SourceFitnessWeekly, analysis.SourceTrainingSummary:
 		if clients.fitness == nil {
 			return series, errors.New("missing fitness client")
 		}
@@ -76,23 +76,14 @@ func loadAnalyzerSeries(ctx context.Context, clients analyzerClients, metric ana
 		if err != nil {
 			return series, err
 		}
-		if metric == "weekly_tss" || metric == "weekly_hours" {
-			series.Samples, series.MissingDays = weeklySummarySamples(rows, metric, window, unitSystem)
-			series.Assumptions["sample_grain"] = string(analysis.SampleGrainWeekly)
-			series.Assumptions["aggregation"] = map[bool]string{true: "weekly_hours", false: "weekly_sum"}[metric == "weekly_hours"]
-			series.Assumptions["expected_weekly_buckets"] = expectedWeeklyBuckets(window.Days)
-			return series, nil
-		}
-		seen := map[string]bool{}
-		for _, row := range rows {
-			if value, ok := summaryMetricValue(row, metric, unitSystem); ok {
-				series.Samples = append(series.Samples, analysis.NumericSample{Key: row.Date, Date: row.Date, Value: value})
-				seen[row.Date] = true
-			}
-		}
-		series.Samples = sortedSamples(series.Samples)
-		series.MissingDays = analysis.MissingSamples(window.Days, len(seen))
-		series.Assumptions["aggregation"] = "native_daily"
+		var missingAnchors int
+		series.Samples, missingAnchors = weeklySummarySamples(rows, metric, window, unitSystem)
+		series.MissingDays = 0
+		series.Assumptions["sample_grain"] = string(analysis.SampleGrainWeekly)
+		series.Assumptions["aggregation"] = "upstream_weekly_anchor_value"
+		series.Assumptions["expected_weekly_anchors"] = len(expectedWeeklyAnchorDates(window))
+		series.Assumptions["missing_weekly_anchors"] = missingAnchors
+		series.Assumptions["missing_days_applicable"] = false
 	case analysis.SourceWellnessDaily:
 		if clients.wellness == nil {
 			return series, errors.New("missing wellness client")
@@ -215,43 +206,40 @@ func shiftedLookupWindow(window analysis.ParsedWindow, lagDays int) analysis.Win
 }
 
 func weeklySummarySamples(rows []intervals.SummaryWithCats, metric analysis.Metric, window analysis.ParsedWindow, unitSystem response.UnitSystem) ([]analysis.NumericSample, int) {
-	byDate := map[string]intervals.SummaryWithCats{}
+	expected := expectedWeeklyAnchorDates(window)
+	anchorIndex := make(map[string]int, len(expected))
+	for index, date := range expected {
+		anchorIndex[date] = index
+	}
+	byDate := map[string]analysis.NumericSample{}
 	for _, row := range rows {
-		byDate[row.Date] = row
-	}
-	samples := []analysis.NumericSample{}
-	missingDays := 0
-	for bucketIndex, start := 0, window.Start; !start.After(window.End); bucketIndex, start = bucketIndex+1, start.AddDate(0, 0, 7) {
-		end := start.AddDate(0, 0, 6)
-		if end.After(window.End) {
-			end = window.End
+		bucket, ok := anchorIndex[row.Date]
+		if !ok {
+			continue
 		}
-		var sum float64
-		var seen bool
-		for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
-			row, ok := byDate[day.Format(time.DateOnly)]
-			if !ok {
-				missingDays++
-				continue
-			}
-			if value, ok := summaryMetricValue(row, metric, unitSystem); ok {
-				sum += value
-				seen = true
-			}
-		}
-		if seen {
-			key := start.Format(time.DateOnly) + "/" + end.Format(time.DateOnly)
-			samples = append(samples, analysis.NumericSample{Key: key, Date: start.Format(time.DateOnly), Bucket: bucketIndex, Value: sum})
+		if value, ok := summaryMetricValue(row, metric, unitSystem); ok {
+			byDate[row.Date] = analysis.NumericSample{Key: row.Date, Date: row.Date, Bucket: bucket, Value: value}
 		}
 	}
-	return samples, missingDays
+	samples := make([]analysis.NumericSample, 0, len(byDate))
+	for _, date := range expected {
+		if sample, ok := byDate[date]; ok {
+			samples = append(samples, sample)
+		}
+	}
+	return samples, len(expected) - len(samples)
 }
 
-func expectedWeeklyBuckets(days int) int {
-	if days <= 0 {
-		return 0
+func expectedWeeklyAnchorDates(window analysis.ParsedWindow) []string {
+	first := window.Start
+	for first.Weekday() != time.Monday {
+		first = first.AddDate(0, 0, 1)
 	}
-	return (days + 6) / 7
+	anchors := []string{}
+	for date := first; !date.After(window.End); date = date.AddDate(0, 0, 7) {
+		anchors = append(anchors, date.Format(time.DateOnly))
+	}
+	return anchors
 }
 
 func analyzerMetaAssumptions(base map[string]any, window analysis.Window, includeFull bool) map[string]any {

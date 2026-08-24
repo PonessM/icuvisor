@@ -213,14 +213,11 @@ func selectAnalyzerMetricSource(metric analysis.Metric, grain analysis.SampleGra
 	return analyzerMetricSelection{}, analyzerUnsupportedMetricError(metric, sources)
 }
 
-func sourcePreference(grain analysis.SampleGrain, allowWeekly bool) []analysis.SourceFamily {
+func sourcePreference(grain analysis.SampleGrain, _ bool) []analysis.SourceFamily {
 	if grain == analysis.SampleGrainActivity {
 		return []analysis.SourceFamily{analysis.SourceActivityRow}
 	}
-	families := []analysis.SourceFamily{analysis.SourceFitnessDaily, analysis.SourceWellnessDaily, analysis.SourceTrainingSummary, analysis.SourceActivityRow}
-	if allowWeekly {
-		families = append(families, analysis.SourceDerivedWeekly)
-	}
+	families := []analysis.SourceFamily{analysis.SourceFitnessWeekly, analysis.SourceWellnessDaily, analysis.SourceTrainingSummary, analysis.SourceActivityRow}
 	return families
 }
 

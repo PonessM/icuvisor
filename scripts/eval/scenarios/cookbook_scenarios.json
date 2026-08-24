@@ -498,7 +498,7 @@
       "id": "CB-PLAN-04",
       "recipe": "season-and-block-plan",
       "persona": "athlete",
-      "prompt": "I am a triathlete starting a new build block. Use icuvisor to assess the last 8 weeks before suggesting priorities: read my combined fitness trend with per-sport load trends enabled, and read my training-load summary. Separate run, bike, and swim fatigue/progression, but keep global form/TSB distinct from computed per-sport TSB-style estimates. Tell me which sport needs caution, which can progress, and what caveats apply. Do not write anything to my calendar.",
+      "prompt": "I am a triathlete starting a new build block. Use icuvisor to assess the last 8 weeks before suggesting priorities: read my combined fitness trend with per-sport load trends enabled, and read my training-load summary. Report when per-sport CTL/ATL/TSB is unavailable, and use only factual weekly run, bike, and swim category totals when present. Keep global form/TSB distinct, preserve weekly-anchor and partial-week caveats, and do not infer daily discipline load or fatigue. Tell me the evidence gaps and any conditional discipline priorities. Do not write anything to my calendar.",
       "expected_tools": [
         "get_fitness",
         "get_training_summary"
@@ -515,16 +515,17 @@
       ],
       "must_address": [
         "get_fitness called with include_per_sport_load_trends enabled",
-        "run, bike, and swim load trends discussed separately",
+        "explicit unavailable reason for per-sport CTL/ATL/TSB",
+        "run, bike, and swim weekly category totals discussed separately only when present",
         "combined CTL/ATL/TSB used for global form or freshness",
-        "computed per-sport trend caveats stated",
-        "discipline-specific caution or progression recommendation",
+        "weekly-anchor and partial-week caveats stated",
+        "discipline-specific evidence gaps or conditional priorities",
         "does not write to the calendar"
       ],
       "anti_patterns": [
-        "treats computed per-sport TSB-style values as the athlete's global form",
-        "claims per-sport CTL/ATL/TSB are upstream-native values",
-        "collapses triathlon load into only a combined-load recommendation",
+        "computes or claims per-sport CTL/ATL/TSB values",
+        "treats weekly category totals as daily discipline load or fatigue",
+        "ignores the explicit unavailable or partial-week caveat",
         "writes events to the calendar"
       ]
     },

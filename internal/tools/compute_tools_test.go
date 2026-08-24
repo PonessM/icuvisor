@@ -116,23 +116,30 @@ func (c *fakeComputeClient) ListEvents(context.Context, intervals.ListEventsPara
 	return append([]intervals.Event(nil), c.events...), nil
 }
 
-func TestComputeZoneTimePrefersSummaryAndReportsMissingDays(t *testing.T) {
+func TestComputeZoneTimePrefersSummaryAndReportsWeeklyAnchorCoverage(t *testing.T) {
 	client := newFakeComputeClient()
-	client.summaries = []intervals.SummaryWithCats{{Date: "2026-05-01", TimeInZones: []float64{1800, 900, 300}, TimeInZonesTot: 3000, TrainingLoad: 75}}
+	client.summaries = []intervals.SummaryWithCats{
+		{Date: "2026-05-04", TimeInZones: []float64{1800, 900, 300}, TimeInZonesTot: 3000, TrainingLoad: 75},
+		{Date: "2026-05-11", TimeInZones: []float64{900, 450, 150}, TimeInZonesTot: 1500, TrainingLoad: 35},
+	}
 	tool := newComputeZoneTimeTool(client, client, client, client, "test", "UTC", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: []byte(`{"start_date":"2026-05-01","end_date":"2026-05-02","zone_metric":"power","include_full":true}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: []byte(`{"start_date":"2026-05-04","end_date":"2026-05-17","zone_metric":"power","include_full":true}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
 	got := resultMap(t, result)
 	resultMap := got["result"].(map[string]any)
 	meta := got["_meta"].(map[string]any)
-	if status := resultMap["status"]; status != "partial" {
-		t.Fatalf("status = %v, want partial for missing day", status)
+	if status := resultMap["status"]; status != "ok" {
+		t.Fatalf("status = %v, want ok for complete weekly-anchor coverage", status)
 	}
-	if missing := meta["missing_days"]; missing != float64(1) {
-		t.Fatalf("_meta.missing_days = %v, want 1", missing)
+	if missing := meta["missing_days"]; missing != float64(0) {
+		t.Fatalf("_meta.missing_days = %v, want 0 because calendar-day coverage is not applicable", missing)
+	}
+	assumptions := meta["assumptions"].(map[string]any)
+	if assumptions["expected_weekly_anchors"] != float64(2) || assumptions["missing_weekly_anchors"] != float64(0) || assumptions["missing_days_applicable"] != false {
+		t.Fatalf("assumptions = %#v, want complete weekly-anchor coverage", assumptions)
 	}
 	if client.activityCalls != 0 || len(client.detailCalls) != 0 || client.intervalCalls != 0 {
 		t.Fatalf("unexpected fallback calls: activities=%d details=%v intervals=%d", client.activityCalls, client.detailCalls, client.intervalCalls)
@@ -140,6 +147,55 @@ func TestComputeZoneTimePrefersSummaryAndReportsMissingDays(t *testing.T) {
 	sourceTools := stringSliceFromAny(meta["source_tools"])
 	if !slices.Equal(sourceTools, []string{getTrainingSummaryName}) {
 		t.Fatalf("source_tools = %v, want training summary only", sourceTools)
+	}
+}
+
+func TestComputeZoneTimeReportsMissingWeeklyAnchor(t *testing.T) {
+	client := newFakeComputeClient()
+	client.summaries = []intervals.SummaryWithCats{{Date: "2026-05-04", TimeInZones: []float64{1800, 900, 300}, TimeInZonesTot: 3000, TrainingLoad: 75}}
+	tool := newComputeZoneTimeTool(client, client, client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: []byte(`{"start_date":"2026-05-04","end_date":"2026-05-17","zone_metric":"power"}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	got := resultMap(t, result)
+	zoneResult := got["result"].(map[string]any)
+	if zoneResult["status"] != "partial" || zoneResult["insufficient_reason"] != "some_weekly_anchors_or_sources_missing" {
+		t.Fatalf("result = %#v, want partial for missing weekly anchor", got["result"])
+	}
+	meta := got["_meta"].(map[string]any)
+	assumptions := meta["assumptions"].(map[string]any)
+	if meta["missing_days"] != float64(0) || assumptions["missing_weekly_anchors"] != float64(1) {
+		t.Fatalf("metadata = %#v, want one missing weekly anchor and no calendar-day missingness", meta)
+	}
+}
+
+func TestComputeZoneTimeTreatsPresentUnusableWeeklyAnchorAsMissing(t *testing.T) {
+	client := newFakeComputeClient()
+	client.summaries = []intervals.SummaryWithCats{
+		{Date: "2026-05-04", TimeInZones: []float64{1800, 900, 300}, TimeInZonesTot: 3000, TrainingLoad: 75},
+		{Date: "2026-05-11", TimeInZones: []float64{0, 0, 0}, TimeInZonesTot: 1, TrainingLoad: 35},
+	}
+	tool := newComputeZoneTimeTool(client, client, client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: []byte(`{"start_date":"2026-05-04","end_date":"2026-05-17","zone_metric":"power","include_full":true}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	got := resultMap(t, result)
+	zoneResult := got["result"].(map[string]any)
+	if zoneResult["status"] != "partial" || zoneResult["insufficient_reason"] != "some_weekly_anchors_or_sources_missing" {
+		t.Fatalf("result = %#v, want partial for unusable weekly anchor", zoneResult)
+	}
+	meta := got["_meta"].(map[string]any)
+	assumptions := meta["assumptions"].(map[string]any)
+	if assumptions["missing_weekly_anchors"] != float64(1) {
+		t.Fatalf("assumptions = %#v, want one unusable anchor counted missing", assumptions)
+	}
+	series := got["series"].([]any)
+	if len(series) != 2 || series[1].(map[string]any)["date"] != "2026-05-11" || series[1].(map[string]any)["missing_reason"] != "missing_summary_time_in_zones" {
+		t.Fatalf("series = %#v, want distinct unusable-anchor diagnostic row", series)
 	}
 }
 
@@ -456,8 +512,8 @@ func TestComputeBaselineWeeklyAndActivityGrains(t *testing.T) {
 	t.Run("weekly training load buckets summary rows", func(t *testing.T) {
 		client := newFakeComputeClient()
 		client.summaries = []intervals.SummaryWithCats{
-			{Date: "2026-05-04", TrainingLoad: 10}, {Date: "2026-05-05", TrainingLoad: 20},
-			{Date: "2026-05-11", TrainingLoad: 30}, {Date: "2026-05-12", TrainingLoad: 30},
+			{Date: "2026-05-04", TrainingLoad: 30},
+			{Date: "2026-05-11", TrainingLoad: 60},
 			{Date: "2026-05-18", TrainingLoad: 90},
 		}
 		tool := newComputeBaselineTool(client, nil, nil, nil, client, "test", "UTC", false)
@@ -467,8 +523,14 @@ func TestComputeBaselineWeeklyAndActivityGrains(t *testing.T) {
 		}
 		resultMap := resultMap(t, result)["result"].(map[string]any)
 		metricSource := resultMap["metric_source"].(map[string]any)
-		if metricSource["grain"] != "derived_weekly" || resultMap["n_baseline"] != float64(2) {
-			t.Fatalf("result = %v, want two derived weekly samples", resultMap)
+		if metricSource["grain"] != "weekly" || resultMap["n_baseline"] != float64(2) {
+			t.Fatalf("result = %v, want two upstream weekly-anchor samples", resultMap)
+		}
+		if _, ok := resultMap["missing_baseline_days"]; ok {
+			t.Fatalf("result = %v, weekly source must not report calendar-day missingness", resultMap)
+		}
+		if resultMap["missing_baseline_anchors"] != float64(0) || resultMap["missing_current_anchors"] != float64(0) {
+			t.Fatalf("result = %v, want complete weekly-anchor coverage", resultMap)
 		}
 		assertFloatEqual(t, resultMap["current_value"], 90)
 	})
@@ -489,6 +551,9 @@ func TestComputeBaselineWeeklyAndActivityGrains(t *testing.T) {
 		metricSource := resultMap["metric_source"].(map[string]any)
 		if metricSource["grain"] != "activity" || resultMap["n_baseline"] != float64(2) {
 			t.Fatalf("result = %v, want activity grain with ride excluded", resultMap)
+		}
+		if resultMap["missing_baseline_days"] != float64(0) || resultMap["missing_current_days"] != float64(0) {
+			t.Fatalf("result = %v, daily/activity source must retain explicit calendar-day coverage", resultMap)
 		}
 		assertFloatEqual(t, resultMap["current_value"], 160)
 	})
