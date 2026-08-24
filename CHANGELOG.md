@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-24
+
 ### Fixed
 
 - Typed athlete-summary tools now exclude weekly bucket anchors outside their requested inclusive athlete-local windows, while strict raw analyzers retain invalid and out-of-window evidence. Summary-backed analyzers report weekly-anchor coverage instead of calendar-day missingness, and `get_fitness` omits unsupported per-sport daily CTL/ATL/TSB estimates rather than distributing weekly load with false precision.
@@ -426,7 +428,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/ricardocabral/icuvisor/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/ricardocabral/icuvisor/compare/v1.5.10...v1.6.0
 [1.5.10]: https://github.com/ricardocabral/icuvisor/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/ricardocabral/icuvisor/compare/v1.5.8...v1.5.9
