@@ -109,7 +109,10 @@ func getActivityHistogramHandler(streamsClient ActivityStreamsClient, detailsCli
 			return encodeActivityHistogramResponse(payload, args.IncludeFull, version, debugMetadata, unitSystem, shapeCfg)
 		}
 
-		zoneConfig := histogramZoneConfig(metric, emittedUnit, activity, profile, profileAvailable)
+		zoneConfig, powerZoneCode := histogramZoneConfig(metric, emittedUnit, activity, profile, profileAvailable)
+		if powerZoneCode != intervals.PowerZoneValid {
+			warnings = append(warnings, string(powerZoneCode))
+		}
 		result := analysis.BuildHistogram(samples, histogramUnitLabel(metric, emittedUnit), zoneConfig)
 		if result.N == 0 || len(result.Buckets) == 0 {
 			payload := unavailableActivityHistogramResponse(args.ActivityID, metric, "insufficient_sample", "required streams did not contain valid positive-duration intervals", sourceTools, result.N, warnings)
@@ -247,21 +250,23 @@ func histogramUnitLabel(metric analysis.HistogramMetric, emittedUnit string) str
 	}
 }
 
-func histogramZoneConfig(metric analysis.HistogramMetric, emittedUnit string, activity intervals.Activity, profile intervals.AthleteWithSportSettings, profileAvailable bool) *analysis.HistogramZoneConfig {
+func histogramZoneConfig(metric analysis.HistogramMetric, emittedUnit string, activity intervals.Activity, profile intervals.AthleteWithSportSettings, profileAvailable bool) (*analysis.HistogramZoneConfig, intervals.PowerZoneValidationCode) {
 	if !profileAvailable {
-		return nil
+		return nil, intervals.PowerZoneValid
 	}
 	setting, ok := selectHistogramSportSetting(activity, profile.SportSettings)
 	if !ok {
-		return nil
+		return nil, intervals.PowerZoneValid
 	}
 	config := analysis.HistogramZoneConfig{Sport: strings.TrimSpace(setting.Type), SportSettingID: setting.ID, Metric: string(metric), Unit: histogramUnitLabel(metric, emittedUnit)}
 	switch metric {
 	case analysis.HistogramMetricPowerWatts:
-		for _, boundary := range setting.PowerZoneUpperBoundsPercentOfFTP {
-			config.Boundaries = append(config.Boundaries, float64(boundary))
+		normalized, code := intervals.NormalizePowerZones(setting.FTP, setting.PowerZoneUpperBoundsPercentOfFTP, setting.PowerZoneNames)
+		if code != intervals.PowerZoneValid {
+			return nil, code
 		}
-		config.Names = append([]string(nil), setting.PowerZoneNames...)
+		config.Boundaries = normalized.AnalyzerLowerBoundsWatts
+		config.Names = normalized.AnalyzerNames
 	case analysis.HistogramMetricHeartRateBPM:
 		for _, boundary := range setting.HRZones {
 			config.Boundaries = append(config.Boundaries, float64(boundary))
@@ -272,7 +277,7 @@ func histogramZoneConfig(metric analysis.HistogramMetric, emittedUnit string, ac
 		for _, boundary := range setting.PaceZones {
 			converted, ok := analysis.ConvertPaceZonePercentage(boundary, thresholdMetersPerSecond, emittedUnit)
 			if !ok {
-				return nil
+				return nil, intervals.PowerZoneValid
 			}
 			config.Boundaries = append(config.Boundaries, converted)
 		}
@@ -280,9 +285,9 @@ func histogramZoneConfig(metric analysis.HistogramMetric, emittedUnit string, ac
 		config.PaceUnits = setting.PaceUnits
 	}
 	if len(config.Boundaries) == 0 {
-		return nil
+		return nil, intervals.PowerZoneValid
 	}
-	return &config
+	return &config, intervals.PowerZoneValid
 }
 
 func selectHistogramSportSetting(activity intervals.Activity, settings []intervals.SportSettings) (intervals.SportSettings, bool) {

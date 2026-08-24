@@ -11,8 +11,8 @@ func TestComputeZoneEnergy(t *testing.T) {
 	standardConfig := PowerZoneConfig{
 		Sport:           "Ride",
 		SportSettingID:  7,
-		BoundariesWatts: []float64{0, 100, 200},
-		Names:           []string{"Recovery", "Endurance", "Tempo"},
+		BoundariesWatts: []float64{0, 100, 200, 300},
+		Names:           []string{"Recovery", "Endurance", "Tempo", "Above Tempo"},
 	}
 
 	tests := []struct {
@@ -34,10 +34,10 @@ func TestComputeZoneEnergy(t *testing.T) {
 			},
 			wantSeconds:      9,
 			wantKJ:           1.1,
-			wantZoneSeconds:  []float64{2, 3, 4},
-			wantZoneKJ:       []float64{0, 0.3, 0.8},
-			wantTimeShares:   []float64{0.2222, 0.3333, 0.4445},
-			wantEnergyShares: []float64{0, 0.2727, 0.7273},
+			wantZoneSeconds:  []float64{2, 3, 4, 0},
+			wantZoneKJ:       []float64{0, 0.3, 0.8, 0},
+			wantTimeShares:   []float64{0.2222, 0.3333, 0.4445, 0},
+			wantEnergyShares: []float64{0, 0.2727, 0.7273, 0},
 		},
 		{
 			name: "sub-boundary coasting uses explicit below bucket",
@@ -65,10 +65,10 @@ func TestComputeZoneEnergy(t *testing.T) {
 			},
 			wantSeconds:      4,
 			wantKJ:           1,
-			wantZoneSeconds:  []float64{0, 0, 4},
-			wantZoneKJ:       []float64{0, 0, 1},
-			wantTimeShares:   []float64{0, 0, 1},
-			wantEnergyShares: []float64{0, 0, 1},
+			wantZoneSeconds:  []float64{0, 0, 4, 0},
+			wantZoneKJ:       []float64{0, 0, 1, 0},
+			wantTimeShares:   []float64{0, 0, 1, 0},
+			wantEnergyShares: []float64{0, 0, 1, 0},
 		},
 	}
 
