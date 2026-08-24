@@ -12,7 +12,7 @@ import (
 func TestAnalysisFormulasMarkdownGolden(t *testing.T) {
 	t.Parallel()
 
-	const wantSHA256 = "851827c82fb79d1ea967483507462881cf6a79283b2101f438b4263930347467"
+	const wantSHA256 = "58cb81965f46bd5b9be581bc1673233422014871a409464b8d1cf11fffc5433d"
 
 	got := AnalysisFormulasMarkdown()
 	want, err := os.ReadFile("testdata/analysis_formulas.md")
@@ -105,10 +105,41 @@ func TestAnalysisFormulasMarkdownPinsRequiredFormulaRefs(t *testing.T) {
 					t.Fatalf("markdown missing %q", want)
 				}
 			}
-			if count := strings.Count(markdown, check.ref); count != 1 {
+			if count := strings.Count(markdown, "Ref: `"+check.ref+"`."); count != 1 {
 				t.Fatalf("ref %s count = %d, want exactly 1", check.ref, count)
 			}
 		})
+	}
+}
+
+func TestAnalysisFormulasPowerZoneMechanicalWorkVersions(t *testing.T) {
+	t.Parallel()
+
+	const v2Ref = AnalysisFormulasURI + "#power_zone_mechanical_work_v2"
+	const legacyParagraph = "Power-zone mechanical work integrates canonical recorded power over elapsed sample timestamps using the left endpoint: for each eligible interval calculate `delta_t_i = t_(i+1) - t_i`, assign `delta_t_i` and `work_i = power_i * delta_t_i` to the lower-inclusive, upper-exclusive configured power zone containing `power_i`, with the final zone open-ended and an explicit below-zone bucket `[0, first_boundary)` when the first configured boundary is greater than zero, then sum zone seconds and joules and convert with `zone_kJ = zone_joules / 1000`. Require finite timestamps, `0 < delta_t_i <= 60 seconds`, and finite nonnegative left-endpoint power; skip invalid or longer intervals, do not interpolate missing power, and give the final sample zero duration because it has no following timestamp. Reported kJ is external mechanical work only, not metabolic energy, calorie expenditure, or food calories. Source: BIPM, The International System of Units (SI Brochure), 9th edition, definitions of the joule and watt (`W = J/s`)."
+
+	entries := make(map[string]analysisFormulaEntry, len(analysisFormulaEntries))
+	for _, entry := range analysisFormulaEntries {
+		entries[entry.ref] = entry
+	}
+	if got := entries[AnalysisFormulaRefPowerZoneMechanicalWork].paragraph; got != legacyParagraph {
+		t.Fatalf("legacy power-zone formula paragraph changed:\n got: %q\nwant: %q", got, legacyParagraph)
+	}
+
+	v2, ok := entries[v2Ref]
+	if !ok {
+		t.Fatalf("formula registry missing %s", v2Ref)
+	}
+	for _, want := range []string{
+		"percentage upper ceilings",
+		"[lower, upper)",
+		"explicit above-final bucket",
+		"left endpoint",
+		"work_i = power_i * delta_t_i",
+	} {
+		if !strings.Contains(v2.paragraph, want) {
+			t.Errorf("v2 formula paragraph missing %q", want)
+		}
 	}
 }
 

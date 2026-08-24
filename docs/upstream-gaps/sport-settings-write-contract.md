@@ -10,6 +10,16 @@ The MCP `update_sport_settings` input exposes this as optional `recalc_hr_zones`
 
 `effective_date` is not part of the MCP request, examples, metadata, or generated schema. Strict decoding rejects it, like any other unknown argument, before a profile lookup or upstream request.
 
+## Corrected power-zone contract
+
+The upstream `power_zones` array is not watts. It is the exact ordered `[]integer` of positive, strictly increasing **percentage upper ceilings of FTP**. `get_athlete_profile` exposes it as `power_zones_percent_of_ftp`, and exposes the matching derived `[]number` watt ceilings as `power_zones_watts`, where each value is `ftp_watts * percentage / 100`. `power_zone_names`, when present, aligns one-for-one with those ceilings. `ftp_watts` and optional `indoor_ftp_watts` remain threshold fields; neither is inferred from a zone boundary.
+
+For `update_sport_settings`, a `zones` item with `kind: "power"` must send those same positive, strictly increasing integer percentage ceilings in `boundaries`; it must never send watt values. Supplying zones replaces the existing zone definitions and requires `ICUVISOR_DELETE_MODE=full`. If names are supplied they must be nonempty and match the ceiling count; omitting names preserves existing names only when the old count is compatible.
+
+This intentionally breaks the former documented watt-boundary write shape. Clients with a cached MCP schema must start a new conversation after upgrading, then resend power-zone writes as percentages. The stable normalization/failure codes are `missing_power_zones`, `missing_power_ftp`, `invalid_power_zone_ceilings`, and `mismatched_power_zone_names`; profile readiness additionally reports `missing_power_threshold` when the sport FTP threshold is absent.
+
+Power analyzers normalize the percentage ceilings with FTP before use. Configured named zones receive power in `[lower, upper)`; an explicit above-final bucket receives power at or above the last derived watt ceiling. This overflow bucket is an analyzer result, not an additional persisted upstream zone. The integration remains left-endpoint watts over timestamp intervals.
+
 ## Apply
 
 `PUT /api/v1/athlete/{athleteId}/sport-settings/{id}/apply` takes no query parameters and no request body. It is a distinct explicit client operation and is not invoked by `UpdateSportSettings` or the MCP update tool.

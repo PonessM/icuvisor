@@ -163,7 +163,7 @@ func TestZoneEnergyContract(t *testing.T) {
 		if ZoneEnergyMethod != "left_endpoint_power_timestamp_integration" {
 			t.Fatalf("method = %q", ZoneEnergyMethod)
 		}
-		if ZoneEnergyFormulaRef != "icuvisor://analysis-formulas#power_zone_mechanical_work" {
+		if ZoneEnergyFormulaRef != "icuvisor://analysis-formulas#power_zone_mechanical_work_v2" {
 			t.Fatalf("formula ref = %q", ZoneEnergyFormulaRef)
 		}
 		if ZoneEnergyMaxIntervalSeconds != 60 {

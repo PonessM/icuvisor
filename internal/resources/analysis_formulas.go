@@ -9,16 +9,17 @@ const (
 	AnalysisFormulasURI      = "icuvisor://analysis-formulas"
 	AnalysisFormulasMIMEType = "text/markdown"
 
-	AnalysisFormulaRefHRDrift                 = AnalysisFormulasURI + "#hr_drift"
-	AnalysisFormulaRefPwHRDecoupling          = AnalysisFormulasURI + "#pw_hr_decoupling"
-	AnalysisFormulaRefPolarization            = AnalysisFormulasURI + "#polarization_index"
-	AnalysisFormulaRefEfficiencyFactor        = AnalysisFormulasURI + "#efficiency_factor"
-	AnalysisFormulaRefVariabilityIndex        = AnalysisFormulasURI + "#variability_index"
-	AnalysisFormulaRefZScore                  = AnalysisFormulasURI + "#z_score"
-	AnalysisFormulaRefPerformancePotential    = AnalysisFormulasURI + "#performance_potential"
-	AnalysisFormulaRefPowerZoneMechanicalWork = AnalysisFormulasURI + "#power_zone_mechanical_work"
-	AnalysisFormulaRefTrainingLoadMonotony    = AnalysisFormulasURI + "#training_load_monotony"
-	AnalysisFormulaRefWorkoutProgression      = AnalysisFormulasURI + "#workout_progression_evidence"
+	AnalysisFormulaRefHRDrift                   = AnalysisFormulasURI + "#hr_drift"
+	AnalysisFormulaRefPwHRDecoupling            = AnalysisFormulasURI + "#pw_hr_decoupling"
+	AnalysisFormulaRefPolarization              = AnalysisFormulasURI + "#polarization_index"
+	AnalysisFormulaRefEfficiencyFactor          = AnalysisFormulasURI + "#efficiency_factor"
+	AnalysisFormulaRefVariabilityIndex          = AnalysisFormulasURI + "#variability_index"
+	AnalysisFormulaRefZScore                    = AnalysisFormulasURI + "#z_score"
+	AnalysisFormulaRefPerformancePotential      = AnalysisFormulasURI + "#performance_potential"
+	AnalysisFormulaRefPowerZoneMechanicalWork   = AnalysisFormulasURI + "#power_zone_mechanical_work"
+	AnalysisFormulaRefPowerZoneMechanicalWorkV2 = AnalysisFormulasURI + "#power_zone_mechanical_work_v2"
+	AnalysisFormulaRefTrainingLoadMonotony      = AnalysisFormulasURI + "#training_load_monotony"
+	AnalysisFormulaRefWorkoutProgression        = AnalysisFormulasURI + "#workout_progression_evidence"
 )
 
 type analysisFormulaEntry struct {
@@ -68,6 +69,11 @@ var analysisFormulaEntries = []analysisFormulaEntry{
 		ref:       AnalysisFormulaRefPowerZoneMechanicalWork,
 		label:     "Power-zone mechanical work",
 		paragraph: "Power-zone mechanical work integrates canonical recorded power over elapsed sample timestamps using the left endpoint: for each eligible interval calculate `delta_t_i = t_(i+1) - t_i`, assign `delta_t_i` and `work_i = power_i * delta_t_i` to the lower-inclusive, upper-exclusive configured power zone containing `power_i`, with the final zone open-ended and an explicit below-zone bucket `[0, first_boundary)` when the first configured boundary is greater than zero, then sum zone seconds and joules and convert with `zone_kJ = zone_joules / 1000`. Require finite timestamps, `0 < delta_t_i <= 60 seconds`, and finite nonnegative left-endpoint power; skip invalid or longer intervals, do not interpolate missing power, and give the final sample zero duration because it has no following timestamp. Reported kJ is external mechanical work only, not metabolic energy, calorie expenditure, or food calories. Source: BIPM, The International System of Units (SI Brochure), 9th edition, definitions of the joule and watt (`W = J/s`).",
+	},
+	{
+		ref:       AnalysisFormulaRefPowerZoneMechanicalWorkV2,
+		label:     "Power-zone mechanical work v2",
+		paragraph: "Power-zone mechanical work v2 normalizes the configured upstream power-zone percentage upper ceilings against the sport FTP to obtain matching watt ceilings. It constructs analyzer lower bounds `0, ceiling_1, ..., ceiling_n`: each configured named zone receives left-endpoint power in `[lower, upper)`, and an explicit above-final bucket receives power at or above the final watt ceiling. The watt integration is unchanged: for each eligible interval calculate `delta_t_i = t_(i+1) - t_i`, assign `delta_t_i` and `work_i = power_i * delta_t_i` using the left endpoint, then sum zone seconds and joules and convert with `zone_kJ = zone_joules / 1000`. Require finite timestamps, `0 < delta_t_i <= 60 seconds`, and finite nonnegative left-endpoint power; skip invalid or longer intervals, do not interpolate missing power, and give the final sample zero duration because it has no following timestamp. Reported kJ is external mechanical work only, not metabolic energy, calorie expenditure, or food calories. Source: BIPM, The International System of Units (SI Brochure), 9th edition, definitions of the joule and watt (`W = J/s`).",
 	},
 	{
 		ref:       AnalysisFormulaRefWorkoutProgression,

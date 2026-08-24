@@ -11,7 +11,7 @@ const (
 	// ZoneEnergyMethod identifies the analyzer's timestamp-weighted integration rule.
 	ZoneEnergyMethod = "left_endpoint_power_timestamp_integration"
 	// ZoneEnergyFormulaRef identifies the pinned formula resource entry.
-	ZoneEnergyFormulaRef = "icuvisor://analysis-formulas#power_zone_mechanical_work"
+	ZoneEnergyFormulaRef = "icuvisor://analysis-formulas#power_zone_mechanical_work_v2"
 	// ZoneEnergyMaxIntervalSeconds prevents silent power interpolation across large gaps.
 	ZoneEnergyMaxIntervalSeconds = 60
 	// ZoneEnergyInterpretation keeps mechanical work distinct from metabolic-energy claims.

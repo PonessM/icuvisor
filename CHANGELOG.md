@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_activity_histogram` now converts intervals.icu power-zone percentage ceilings to FTP-derived watt boundaries, so power samples are assigned to the correctly named configured zone.
+
+### Changed
+
+- `update_sport_settings` power-zone boundaries now use positive, strictly increasing integer percentage upper ceilings of FTP rather than watts. This intentional contract correction requires clients with cached tool schemas to start a new conversation after upgrading.
+
 ## [1.6.0] - 2026-08-19
 
 ### Added
