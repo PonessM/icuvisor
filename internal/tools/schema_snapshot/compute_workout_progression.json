@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "activities": {
+      "description": "Ordered comparable completed activities; labels are display-only and activity IDs are never matched by name.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_id": {
+            "description": "Required activity ID.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "Optional exact planned event ID; no event list search is performed.",
+            "type": "string"
+          },
+          "label": {
+            "description": "Optional display label only.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_id"
+        ],
+        "type": "object"
+      },
+      "maxItems": 20,
+      "minItems": 2,
+      "type": "array"
+    },
+    "athlete_id": {
+      "description": "Target athlete; defaults to selected athlete in coach mode, or the only athlete otherwise. Format: i12345 or 12345.",
+      "type": "string"
+    },
+    "include_full": {
+      "description": "Include at most the first 200 normalized prescription/completed interval audit rows; never includes raw streams.",
+      "type": "boolean"
+    },
+    "include_readiness": {
+      "description": "Include source-labelled daily wellness fields matched to each activity-local date.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "activities"
+  ],
+  "type": "object"
+}

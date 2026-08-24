@@ -54,7 +54,6 @@ func NewStreamableHTTPHandler(factory StreamableHTTPServerFactory, opts Streamab
 		Logger:                     logger,
 		SessionTimeout:             streamableHTTPSessionTimeout,
 		DisableLocalhostProtection: false,
-		CrossOriginProtection:      nil,
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodGet {

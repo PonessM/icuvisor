@@ -38,10 +38,12 @@ func NormalizePowerZones(ftpWatts int, upperBoundsPercentOfFTP []int, names []st
 		return result, PowerZoneMissingZones
 	}
 
-	for i, ceiling := range upperBoundsPercentOfFTP {
-		if ceiling <= 0 || (i > 0 && ceiling <= upperBoundsPercentOfFTP[i-1]) {
+	previousCeiling := 0
+	for _, ceiling := range upperBoundsPercentOfFTP {
+		if ceiling <= previousCeiling {
 			return result, PowerZoneInvalidCeilings
 		}
+		previousCeiling = ceiling
 	}
 	if len(names) > 0 && len(names) != len(upperBoundsPercentOfFTP) {
 		return result, PowerZoneMismatchedNames
