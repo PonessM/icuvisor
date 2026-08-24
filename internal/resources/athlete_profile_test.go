@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,6 +60,41 @@ func TestAthleteProfileResourceReturnsSharedShapedProfile(t *testing.T) {
 	}
 	if result.URI != AthleteProfileURI || result.MIMEType != AthleteProfileMIMEType || result.Text != string(wantText) {
 		t.Fatalf("resource result = %#v, want URI/MIME/shared shaped JSON %s", result, wantText)
+	}
+}
+
+func TestAthleteProfileResourcePublishesPowerZoneContractSharedWithTool(t *testing.T) {
+	t.Parallel()
+
+	profile := intervals.AthleteWithSportSettings{
+		ID: "i12345",
+		SportSettings: []intervals.SportSettings{{
+			Types:                            []string{"Ride"},
+			FTP:                              228,
+			PowerZoneUpperBoundsPercentOfFTP: []int{55, 75, 90, 105, 120, 150, 999},
+			PowerZoneNames:                   []string{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"},
+		}},
+	}
+	client := &fakeAthleteProfileClient{profiles: []intervals.AthleteWithSportSettings{profile}}
+	resource := AthleteProfileResource(client, ResourceOptions{Version: "test", TimezoneFallback: "UTC"})
+
+	result, err := resource.Handler(context.Background(), Request{URI: AthleteProfileURI})
+	if err != nil {
+		t.Fatalf("resource handler error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result.Text), &payload); err != nil {
+		t.Fatalf("decode resource response: %v", err)
+	}
+	sport := payload["sport_settings"].([]any)[0].(map[string]any)
+	if got, want := sport["power_zones_percent_of_ftp"], []any{float64(55), float64(75), float64(90), float64(105), float64(120), float64(150), float64(999)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zones_percent_of_ftp = %#v, want %#v", got, want)
+	}
+	if got, want := sport["power_zones_watts"], []any{125.4, 171.0, 205.2, 239.4, 273.6, 342.0, 2277.72}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zones_watts = %#v, want %#v", got, want)
+	}
+	if got, want := sport["power_zone_names"], []any{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zone_names = %#v, want %#v", got, want)
 	}
 }
 
@@ -348,11 +384,11 @@ func resourceTestProfile(id string, name string) intervals.AthleteWithSportSetti
 		PreferredUnits: "metric",
 		Timezone:       "Europe/Lisbon",
 		SportSettings: []intervals.SportSettings{{
-			Types:          []string{"Ride"},
-			FTP:            250,
-			LTHR:           170,
-			PowerZones:     []int{100, 150, 200},
-			PowerZoneNames: []string{"Z1", "Z2", "Z3"},
+			Types:                            []string{"Ride"},
+			FTP:                              250,
+			LTHR:                             170,
+			PowerZoneUpperBoundsPercentOfFTP: []int{100, 150, 200},
+			PowerZoneNames:                   []string{"Z1", "Z2", "Z3"},
 		}},
 	}
 }

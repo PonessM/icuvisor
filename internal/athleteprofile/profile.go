@@ -41,7 +41,8 @@ type Sport struct {
 	PMaxWatts                    int            `json:"p_max_watts,omitempty"`
 	LTHRBPM                      int            `json:"lthr_bpm,omitempty"`
 	MaxHRBPM                     int            `json:"max_hr_bpm,omitempty"`
-	PowerZonesWatts              []int          `json:"power_zones_watts,omitempty"`
+	PowerZonesPercentOfFTP       []int          `json:"power_zones_percent_of_ftp,omitempty"`
+	PowerZonesWatts              []float64      `json:"power_zones_watts,omitempty"`
 	PowerZoneNames               []string       `json:"power_zone_names,omitempty"`
 	HRZonesBPM                   []int          `json:"hr_zones_bpm,omitempty"`
 	HRZoneNames                  []string       `json:"hr_zone_names,omitempty"`
@@ -121,7 +122,7 @@ func NewResponse(profile intervals.AthleteWithSportSettings, version string, tim
 			TimezoneConvention:       "IANA timezone from athlete profile when available; config timezone fallback otherwise",
 			PaceConvention:           "intervals.icu stores threshold_pace in meters per second; pace_units is presentation-only and selects the athlete-facing seconds-per-distance field, while pace_units_source preserves the upstream enum",
 			PowerThresholdConvention: "ftp_watts is the upstream sport FTP threshold; indoor_ftp_watts is the optional upstream indoor FTP override when intervals.icu provides indoor_ftp. Absence of indoor_ftp_watts means Icuvisor has no separate indoor FTP for that sport, not that it should be inferred from zones or planned-event indoor flags.",
-			ZoneBoundaryConvention:   "power_zones_watts and hr_zones_bpm are upstream zone boundary arrays; pace_zones_percent_of_threshold contains upstream percentage-of-threshold boundaries, never pace durations. Pair each zone array with its matching *_zone_names by index when present.",
+			ZoneBoundaryConvention:   "power_zones_percent_of_ftp and power_zones_watts are matching upper ceilings: percentages are exact upstream integers and watts are FTP-derived floats. power_zone_names align by index only when present with the same length. hr_zones_bpm remains an upstream boundary array; pace_zones_percent_of_threshold contains upstream percentage-of-threshold boundaries, never pace durations.",
 			IncludeFull:              includeFull,
 		},
 	}
@@ -130,8 +131,9 @@ func NewResponse(profile intervals.AthleteWithSportSettings, version string, tim
 	}
 	unitSystem := profileUnitSystem(profile)
 	for _, setting := range profile.SportSettings {
-		response.SportSettings = append(response.SportSettings, profileSport(setting, includeFull, unitSystem))
-		response.Meta.Warnings = append(response.Meta.Warnings, sportReadinessWarnings(setting)...)
+		normalizedPowerZones, powerZoneCode := intervals.NormalizePowerZones(setting.FTP, setting.PowerZoneUpperBoundsPercentOfFTP, setting.PowerZoneNames)
+		response.SportSettings = append(response.SportSettings, profileSport(setting, normalizedPowerZones, powerZoneCode, includeFull, unitSystem))
+		response.Meta.Warnings = append(response.Meta.Warnings, sportReadinessWarnings(setting, powerZoneCode)...)
 	}
 	return response
 }
@@ -177,22 +179,25 @@ func profileUnitSystem(profile intervals.AthleteWithSportSettings) response.Unit
 	return response.UnitSystemMetric
 }
 
-func profileSport(setting intervals.SportSettings, includeFull bool, unitSystem response.UnitSystem) Sport {
+func profileSport(setting intervals.SportSettings, normalizedPowerZones intervals.NormalizedPowerZones, powerZoneCode intervals.PowerZoneValidationCode, includeFull bool, unitSystem response.UnitSystem) Sport {
 	sport := Sport{
-		Types:           setting.Types,
-		FTPWatts:        setting.FTP,
-		IndoorFTPWatts:  setting.IndoorFTP,
-		WPrimeJoules:    setting.WPrime,
-		PMaxWatts:       setting.PMax,
-		LTHRBPM:         setting.LTHR,
-		MaxHRBPM:        setting.MaxHR,
-		PowerZonesWatts: setting.PowerZones,
-		PowerZoneNames:  setting.PowerZoneNames,
-		HRZonesBPM:      setting.HRZones,
-		HRZoneNames:     setting.HRZoneNames,
-		PaceUnitsSource: strings.TrimSpace(setting.PaceUnits),
-		PaceLoadType:    strings.TrimSpace(setting.PaceLoadType),
-		PaceZoneNames:   setting.PaceZoneNames,
+		Types:                  setting.Types,
+		FTPWatts:               setting.FTP,
+		IndoorFTPWatts:         setting.IndoorFTP,
+		WPrimeJoules:           setting.WPrime,
+		PMaxWatts:              setting.PMax,
+		LTHRBPM:                setting.LTHR,
+		MaxHRBPM:               setting.MaxHR,
+		PowerZonesPercentOfFTP: normalizedPowerZones.UpperBoundsPercentOfFTP,
+		PowerZoneNames:         append([]string(nil), setting.PowerZoneNames...),
+		HRZonesBPM:             setting.HRZones,
+		HRZoneNames:            setting.HRZoneNames,
+		PaceUnitsSource:        strings.TrimSpace(setting.PaceUnits),
+		PaceLoadType:           strings.TrimSpace(setting.PaceLoadType),
+		PaceZoneNames:          setting.PaceZoneNames,
+	}
+	if powerZoneCode == intervals.PowerZoneValid {
+		sport.PowerZonesWatts = normalizedPowerZones.UpperBoundsWatts
 	}
 	applyProfilePace(&sport, setting, unitSystem)
 	if includeFull {
@@ -209,15 +214,20 @@ func profileTimezone(profileTimezone string, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func sportReadinessWarnings(setting intervals.SportSettings) []ReadinessWarning {
+func sportReadinessWarnings(setting intervals.SportSettings, powerZoneCode intervals.PowerZoneValidationCode) []ReadinessWarning {
 	sportTypes := readinessSportTypes(setting)
 	var warnings []ReadinessWarning
 	if isRideSport(sportTypes) {
 		if setting.FTP <= 0 {
 			warnings = append(warnings, readinessWarning("missing_power_threshold", sportTypes, "ftp_watts", "power threshold is missing for this sport", "Use update_sport_settings with ftp for this sport before power-based planning."))
 		}
-		if len(setting.PowerZones) == 0 {
-			warnings = append(warnings, readinessWarning("missing_power_zones", sportTypes, "power_zones_watts", "power zones are missing for this sport", "Use update_sport_settings with zones kind=power for this sport before zone-based planning."))
+		switch powerZoneCode {
+		case intervals.PowerZoneMissingZones:
+			warnings = append(warnings, readinessWarning("missing_power_zones", sportTypes, "power_zones_percent_of_ftp", "power zones are missing for this sport", "Use update_sport_settings with zones kind=power for this sport before zone-based planning."))
+		case intervals.PowerZoneInvalidCeilings:
+			warnings = append(warnings, readinessWarning("invalid_power_zone_ceilings", sportTypes, "power_zones_percent_of_ftp", "power-zone ceilings are invalid for this sport", "Use update_sport_settings with positive, strictly increasing power-zone ceilings for this sport."))
+		case intervals.PowerZoneMismatchedNames:
+			warnings = append(warnings, readinessWarning("mismatched_power_zone_names", sportTypes, "power_zone_names", "power-zone names do not match the configured ceiling count", "Use update_sport_settings with one power-zone name for each configured ceiling for this sport."))
 		}
 	}
 	if usesHeartRateReadiness(sportTypes) {

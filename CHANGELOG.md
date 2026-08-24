@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_athlete_profile` now exposes exact upstream power-zone percentage ceilings alongside FTP-derived watt ceilings, with explicit field semantics and readiness diagnostics.
+- `get_activity_histogram` now converts intervals.icu power-zone percentage ceilings to FTP-derived watt boundaries, so power samples are assigned to the correctly named configured zone.
+- `compute_zone_energy` now uses the v2 percentage-to-watt formula and attributes power at or above the final configured ceiling to an explicit overflow zone.
+
+### Changed
+
+- `update_sport_settings` power-zone boundaries now use positive, strictly increasing integer percentage upper ceilings of FTP rather than watts. This intentional contract correction requires clients with cached tool schemas to start a new conversation after upgrading.
+
 ## [1.6.0] - 2026-08-19
 
 ### Added

@@ -64,8 +64,14 @@ func TestUpdateSportSettingsSchemaDocumentsInputsAndZoneGate(t *testing.T) {
 	}
 	zoneProps := zones["items"].(map[string]any)["properties"].(map[string]any)
 	boundaryDescription := zoneProps["boundaries"].(map[string]any)["description"].(string)
-	if !strings.Contains(boundaryDescription, "percent-of-threshold-pace") || !strings.Contains(boundaryDescription, "77.5") || !strings.Contains(boundaryDescription, "never durations") {
-		t.Fatalf("zone boundary description = %q, want explicit pace-percentage wording", boundaryDescription)
+	if !strings.Contains(boundaryDescription, "integer percent-of-FTP") || !strings.Contains(boundaryDescription, "bpm") || !strings.Contains(boundaryDescription, "percent-of-threshold-pace") || !strings.Contains(boundaryDescription, "77.5") || !strings.Contains(boundaryDescription, "never durations") {
+		t.Fatalf("zone boundary description = %q, want explicit power, HR, and pace units", boundaryDescription)
+	}
+	examples := schema["examples"].([]map[string]any)
+	ride := examples[len(examples)-1]
+	power := ride["zones"].([]any)[0].(map[string]any)
+	if got := power["boundaries"].([]any); len(got) != 7 || got[0] != 55 || got[6] != 999 {
+		t.Fatalf("Ride power example = %#v, want live percentage ceilings", power)
 	}
 }
 

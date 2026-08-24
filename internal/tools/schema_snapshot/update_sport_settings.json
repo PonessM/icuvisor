@@ -45,17 +45,23 @@
       "zones": [
         {
           "boundaries": [
+            55,
+            75,
+            90,
+            105,
+            120,
             150,
-            200,
-            250,
-            300
+            999
           ],
           "kind": "power",
           "names": [
+            "Active Recovery",
             "Endurance",
             "Tempo",
             "Threshold",
-            "VO2"
+            "VO2 Max",
+            "Anaerobic",
+            "Neuromuscular"
           ]
         }
       ]
@@ -106,17 +112,23 @@
       "zones": [
         {
           "boundaries": [
+            55,
+            75,
+            90,
+            105,
+            120,
             150,
-            200,
-            250,
-            300
+            999
           ],
           "kind": "power",
           "names": [
+            "Active Recovery",
             "Endurance",
             "Tempo",
             "Threshold",
-            "VO2"
+            "VO2 Max",
+            "Anaerobic",
+            "Neuromuscular"
           ]
         }
       ]
@@ -199,7 +211,7 @@
         "additionalProperties": false,
         "properties": {
           "boundaries": {
-            "description": "Ordered zone boundary values: watts for power, bpm for hr, and strictly increasing percent-of-threshold-pace values in (0, 200] for pace. For pace, 100 means threshold pace; values such as 77.5 and 100 are percentages, never durations.",
+            "description": "Ordered zone boundaries: power uses positive, strictly increasing integer percent-of-FTP upper ceilings; hr uses bpm; pace uses strictly increasing percent-of-threshold-pace values in (0, 200]. For pace, 100 means threshold pace; values such as 77.5 and 100 are percentages, never durations.",
             "items": {
               "minimum": 0,
               "type": "number"
@@ -217,7 +229,7 @@
             "type": "string"
           },
           "names": {
-            "description": "Optional zone names; when supplied, length must match boundaries.",
+            "description": "Optional zone names. For power, omission preserves compatible existing names; explicit null or an empty array is rejected, and a supplied nonempty array must match boundaries. For hr and pace, null or an empty array writes boundaries without names; a nonempty array must match boundaries.",
             "items": {
               "type": "string"
             },

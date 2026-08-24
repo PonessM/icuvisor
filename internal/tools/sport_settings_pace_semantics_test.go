@@ -67,7 +67,7 @@ func TestSportSettingsPaceZonePercentagesRemainUnchanged(t *testing.T) {
 		t.Fatalf("validateSportSettingsZones() error = %v", err)
 	}
 	definitions := sportSettingsZoneDefinitions([]updateSportSettingsZoneRequest{{Kind: "pace", Boundaries: boundaries, Names: []string{"Easy", "Threshold"}}})
-	if len(definitions) != 1 || definitions[0].Kind != "pace" || len(definitions[0].Boundaries) != 2 || definitions[0].Boundaries[0] != 77.5 || definitions[0].Boundaries[1] != 100 || definitions[0].Names[1] != "Threshold" {
+	if len(definitions) != 1 || definitions[0].Kind != "pace" || len(definitions[0].PaceBoundariesPercentOfThreshold) != 2 || definitions[0].PaceBoundariesPercentOfThreshold[0] != 77.5 || definitions[0].PaceBoundariesPercentOfThreshold[1] != 100 || definitions[0].Names[1] != "Threshold" {
 		t.Fatalf("pace zone definitions = %#v, want unchanged percentages", definitions)
 	}
 }

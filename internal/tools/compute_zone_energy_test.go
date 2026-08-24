@@ -59,6 +59,113 @@ func TestComputeZoneEnergyRegistrationAndSchema(t *testing.T) {
 	}
 }
 
+func TestComputeZoneEnergyUsesNormalizedPowerZones(t *testing.T) {
+	t.Parallel()
+
+	client := &zoneEnergyTestClient{
+		activities: []intervals.Activity{zoneEnergyActivityFixture(t, `{"id":"a1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`)},
+		profile: intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{{
+			ID:                               7,
+			Type:                             "Ride",
+			FTP:                              228,
+			PowerZoneUpperBoundsPercentOfFTP: []int{55, 75, 90, 105, 120, 150, 999},
+			PowerZoneNames:                   []string{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"},
+		}}},
+		streams: map[string][]intervals.ActivityStream{
+			"a1": zoneEnergyStreamFixtures(t,
+				`{"type":"watts","data":[0,125.4,200,2277.72,2277.72]}`,
+				`{"type":"time","data":[0,10,20,30,40]}`,
+			),
+		},
+		streamErrs: map[string]error{},
+	}
+
+	payload, err := collectZoneEnergy(context.Background(), computeZoneEnergyRequest{StartDate: "2026-01-01", EndDate: "2026-01-01"}, client.activities, client.profile, client)
+	if err != nil {
+		t.Fatalf("collectZoneEnergy() error = %v", err)
+	}
+	if payload.Result.TotalSeconds != 40 || payload.Result.TotalKJ != 26.031 {
+		t.Fatalf("totals = (%v s, %v kJ), want (40 s, 26.031 kJ)", payload.Result.TotalSeconds, payload.Result.TotalKJ)
+	}
+	want := map[string]struct{ seconds, kj float64 }{
+		"Active Recovery":     {seconds: 10, kj: 0},
+		"Endurance":           {seconds: 10, kj: 1.254},
+		"Tempo":               {seconds: 10, kj: 2},
+		"Above Neuromuscular": {seconds: 10, kj: 22.777},
+	}
+	for _, zone := range payload.Result.Zones {
+		if expected, ok := want[zone.Name]; ok {
+			if zone.Seconds != expected.seconds || zone.KJ != expected.kj {
+				t.Fatalf("zone %q = %#v, want %v s and %v kJ", zone.Name, zone, expected.seconds, expected.kj)
+			}
+			delete(want, zone.Name)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing normalized zone rows: %#v", want)
+	}
+}
+
+func TestComputeZoneEnergySkipsInvalidPowerConfigurationBeforeStreams(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		setting  intervals.SportSettings
+		wantCode intervals.PowerZoneValidationCode
+	}{
+		{name: "missing zones", setting: intervals.SportSettings{ID: 7, Type: "Ride", FTP: 228}, wantCode: intervals.PowerZoneMissingZones},
+		{name: "missing FTP", setting: intervals.SportSettings{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{55}, PowerZoneNames: []string{"Active Recovery"}}, wantCode: intervals.PowerZoneMissingFTP},
+		{name: "invalid ceilings", setting: intervals.SportSettings{ID: 7, Type: "Ride", FTP: 228, PowerZoneUpperBoundsPercentOfFTP: []int{55, 55}, PowerZoneNames: []string{"Active Recovery", "Endurance"}}, wantCode: intervals.PowerZoneInvalidCeilings},
+		{name: "mismatched names", setting: intervals.SportSettings{ID: 7, Type: "Ride", FTP: 228, PowerZoneUpperBoundsPercentOfFTP: []int{55, 75}, PowerZoneNames: []string{"Active Recovery"}}, wantCode: intervals.PowerZoneMismatchedNames},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &zoneEnergyTestClient{
+				activities: []intervals.Activity{zoneEnergyActivityFixture(t, `{"id":"a1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`)},
+				profile:    intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{tc.setting}},
+				streams:    map[string][]intervals.ActivityStream{},
+				streamErrs: map[string]error{},
+			}
+			payload, err := collectZoneEnergy(context.Background(), computeZoneEnergyRequest{StartDate: "2026-01-01", EndDate: "2026-01-01"}, client.activities, client.profile, client)
+			if err != nil {
+				t.Fatalf("collectZoneEnergy() error = %v", err)
+			}
+			if payload.Result.InsufficientReason != string(tc.wantCode) || payload.Series[0].Reason != string(tc.wantCode) {
+				t.Fatalf("power configuration result = %#v, want stable code %q", payload, tc.wantCode)
+			}
+			if len(client.streamIDs) != 0 {
+				t.Fatalf("GetActivityStreams called for invalid configuration: %#v", client.streamIDs)
+			}
+		})
+	}
+}
+
+func TestComputeZoneEnergyAggregatesDistinctPowerConfigurationCodes(t *testing.T) {
+	t.Parallel()
+
+	client := &zoneEnergyTestClient{
+		activities: []intervals.Activity{
+			zoneEnergyActivityFixture(t, `{"id":"missing-ftp","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`),
+			zoneEnergyActivityFixture(t, `{"id":"bad-ceilings","type":"Run","start_date_local":"2026-01-02T08:00:00","stream_types":["watts","time"]}`),
+		},
+		profile: intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{
+			{ID: 7, Type: "Ride", PowerZoneUpperBoundsPercentOfFTP: []int{55}, PowerZoneNames: []string{"Active Recovery"}},
+			{ID: 8, Type: "Run", FTP: 228, PowerZoneUpperBoundsPercentOfFTP: []int{55, 55}, PowerZoneNames: []string{"Active Recovery", "Endurance"}},
+		}},
+		streams:    map[string][]intervals.ActivityStream{},
+		streamErrs: map[string]error{},
+	}
+
+	payload, err := collectZoneEnergy(context.Background(), computeZoneEnergyRequest{StartDate: "2026-01-01", EndDate: "2026-01-02"}, client.activities, client.profile, client)
+	if err != nil {
+		t.Fatalf("collectZoneEnergy() error = %v", err)
+	}
+	if payload.Result.InsufficientReason != "mixed_power_zone_config_errors" || len(client.streamIDs) != 0 {
+		t.Fatalf("result = %#v, stream calls = %#v", payload.Result, client.streamIDs)
+	}
+}
+
 func TestComputeZoneEnergyReportsPartialActivityCoverageOnlyInFullResponse(t *testing.T) {
 	t.Parallel()
 
@@ -67,7 +174,7 @@ func TestComputeZoneEnergyReportsPartialActivityCoverageOnlyInFullResponse(t *te
 			zoneEnergyActivityFixture(t, `{"id":"missing","type":"Ride","start_date_local":"2026-01-02T08:00:00","stream_types":["time"]}`),
 			zoneEnergyActivityFixture(t, `{"id":"usable","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`),
 		},
-		profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZones: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
+		profile: intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", FTP: 200, PowerZoneUpperBoundsPercentOfFTP: []int{100, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
 		streams: map[string][]intervals.ActivityStream{
 			"usable": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[100,200,200]}`, `{"type":"time","data":[0,10,20]}`),
 		},
@@ -127,8 +234,8 @@ func TestComputeZoneEnergyAggregatesDisplayedActivityValuesAndReconcilesShares(t
 			zoneEnergyActivityFixture(t, `{"id":"ride-1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`),
 		},
 		profile: intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{
-			{ID: 7, Type: "Ride", PowerZones: []int{0}, PowerZoneNames: []string{"Ride work"}},
-			{ID: 8, Type: "Run", PowerZones: []int{0}, PowerZoneNames: []string{"Run work"}},
+			{ID: 7, Type: "Ride", FTP: 1000, PowerZoneUpperBoundsPercentOfFTP: []int{100}, PowerZoneNames: []string{"Ride work"}},
+			{ID: 8, Type: "Run", FTP: 2000, PowerZoneUpperBoundsPercentOfFTP: []int{100}, PowerZoneNames: []string{"Run work"}},
 		}},
 		streams: map[string][]intervals.ActivityStream{
 			"ride-1": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[1000,1000]}`, `{"type":"time","data":[0,0.0006]}`),
@@ -145,13 +252,18 @@ func TestComputeZoneEnergyAggregatesDisplayedActivityValuesAndReconcilesShares(t
 	if payload.Result.TotalSeconds != 0.003 || payload.Result.TotalKJ != 0.003 {
 		t.Fatalf("headline totals = (%v s, %v kJ), want sums of displayed activity values (0.003, 0.003)", payload.Result.TotalSeconds, payload.Result.TotalKJ)
 	}
-	if len(payload.Result.Zones) != 2 {
-		t.Fatalf("zone rows = %d, want two configuration groups", len(payload.Result.Zones))
+	if len(payload.Result.Zones) != 4 {
+		t.Fatalf("zone rows = %d, want each configured zone and overflow row", len(payload.Result.Zones))
 	}
-	ride, run := payload.Result.Zones[0], payload.Result.Zones[1]
+	rows := map[string]zoneEnergyRow{}
+	for _, row := range payload.Result.Zones {
+		rows[row.Name] = row
+	}
+	ride := rows["Above Ride work"]
 	if ride.Sport != "Ride" || ride.Seconds != 0.002 || ride.KJ != 0.002 || ride.TimeShare != 0.6667 || ride.EnergyShare != 0.6667 {
 		t.Fatalf("ride aggregate = %#v", ride)
 	}
+	run := rows["Above Run work"]
 	if run.Sport != "Run" || run.Seconds != 0.001 || run.KJ != 0.001 || run.TimeShare != 0.3333 || run.EnergyShare != 0.3333 {
 		t.Fatalf("run aggregate = %#v", run)
 	}
@@ -208,7 +320,7 @@ func zoneEnergySingleActivityClient(t *testing.T) *zoneEnergyTestClient {
 	t.Helper()
 	return &zoneEnergyTestClient{
 		activities: []intervals.Activity{zoneEnergyActivityFixture(t, `{"id":"a1","type":"Ride","start_date_local":"2026-01-01T08:00:00","stream_types":["watts","time"]}`)},
-		profile:    intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", PowerZones: []int{0, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
+		profile:    intervals.AthleteWithSportSettings{PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{ID: 7, Type: "Ride", FTP: 200, PowerZoneUpperBoundsPercentOfFTP: []int{100, 150}, PowerZoneNames: []string{"Easy", "Hard"}}}},
 		streams:    map[string][]intervals.ActivityStream{"a1": zoneEnergyStreamFixtures(t, `{"type":"watts","data":[100,200]}`, `{"type":"time","data":[0,10]}`)},
 		streamErrs: map[string]error{},
 	}

@@ -209,16 +209,16 @@ func collectZoneEnergy(ctx context.Context, args computeZoneEnergyRequest, activ
 		matched++
 		audit := zoneEnergyActivityRow{ActivityID: activity.ID, Date: zoneEnergyActivityDate(activity), Sport: zoneEnergyActivitySport(activity), Status: "skipped"}
 		setting, matchedSport, ok := selectZoneEnergySportSetting(activity, profile.SportSettings)
-		if !ok || len(setting.PowerZones) == 0 {
-			audit.Reason = "no_matching_power_zone_config"
+		if !ok {
+			audit.Reason = string(intervals.PowerZoneMissingZones)
 			series = append(series, audit)
 			reasons = append(reasons, audit.Reason)
 			continue
 		}
-		config := zoneEnergyPowerZoneConfig(setting, matchedSport)
+		config, powerZoneCode := zoneEnergyPowerZoneConfig(setting, matchedSport)
 		audit.SportSettingID = config.SportSettingID
-		if err := analysis.ValidatePowerZoneConfig(config); err != nil {
-			audit.Reason = "invalid_power_zone_config"
+		if powerZoneCode != intervals.PowerZoneValid {
+			audit.Reason = string(powerZoneCode)
 			series = append(series, audit)
 			reasons = append(reasons, audit.Reason)
 			continue
@@ -355,25 +355,19 @@ func collectZoneEnergy(ctx context.Context, args computeZoneEnergyRequest, activ
 	return computeZoneEnergyPayload{Result: result, Series: series, Meta: meta}, nil
 }
 
-func zoneEnergyPowerZoneConfig(setting intervals.SportSettings, matchedSport string) analysis.PowerZoneConfig {
+func zoneEnergyPowerZoneConfig(setting intervals.SportSettings, matchedSport string) (analysis.PowerZoneConfig, intervals.PowerZoneValidationCode) {
 	sport := strings.TrimSpace(setting.Type)
 	if sport == "" {
 		sport = strings.TrimSpace(matchedSport)
 	}
-	boundaries := make([]float64, len(setting.PowerZones))
-	for i, boundary := range setting.PowerZones {
-		boundaries[i] = float64(boundary)
+	normalized, code := intervals.NormalizePowerZones(setting.FTP, setting.PowerZoneUpperBoundsPercentOfFTP, setting.PowerZoneNames)
+	config := analysis.PowerZoneConfig{Sport: sport, SportSettingID: setting.ID}
+	if code != intervals.PowerZoneValid {
+		return config, code
 	}
-	names := make([]string, len(boundaries))
-	for i := range boundaries {
-		if i < len(setting.PowerZoneNames) {
-			names[i] = strings.TrimSpace(setting.PowerZoneNames[i])
-		}
-		if names[i] == "" {
-			names[i] = fmt.Sprintf("Zone %d", i+1)
-		}
-	}
-	return analysis.PowerZoneConfig{Sport: sport, SportSettingID: setting.ID, BoundariesWatts: boundaries, Names: names}
+	config.BoundariesWatts = normalized.AnalyzerLowerBoundsWatts
+	config.Names = normalized.AnalyzerNames
+	return config, intervals.PowerZoneValid
 }
 
 func selectZoneEnergySportSetting(activity intervals.Activity, settings []intervals.SportSettings) (intervals.SportSettings, string, bool) {
@@ -521,27 +515,31 @@ func zoneEnergyInsufficientReason(activityCount int, reasons []string) string {
 	if activityCount == 0 {
 		return "no_activities"
 	}
-	allMissingZones := len(reasons) == activityCount
-	allZoneRelated := len(reasons) == activityCount
-	hasInvalidZones := false
+	configurationCodes := map[string]struct{}{}
 	for _, reason := range reasons {
-		if reason != "no_matching_power_zone_config" {
-			allMissingZones = false
+		if !isPowerZoneConfigurationCode(reason) {
+			return "no_usable_power_streams"
 		}
-		if reason != "no_matching_power_zone_config" && reason != "invalid_power_zone_config" {
-			allZoneRelated = false
-		}
-		if reason == "invalid_power_zone_config" {
-			hasInvalidZones = true
+		configurationCodes[reason] = struct{}{}
+	}
+	if len(reasons) != activityCount || len(configurationCodes) == 0 {
+		return "no_usable_power_streams"
+	}
+	if len(configurationCodes) == 1 {
+		for code := range configurationCodes {
+			return code
 		}
 	}
-	if allMissingZones {
-		return "missing_power_zones"
+	return "mixed_power_zone_config_errors"
+}
+
+func isPowerZoneConfigurationCode(reason string) bool {
+	switch intervals.PowerZoneValidationCode(reason) {
+	case intervals.PowerZoneMissingZones, intervals.PowerZoneMissingFTP, intervals.PowerZoneInvalidCeilings, intervals.PowerZoneMismatchedNames:
+		return true
+	default:
+		return false
 	}
-	if allZoneRelated && hasInvalidZones {
-		return "invalid_power_zones"
-	}
-	return "no_usable_power_streams"
 }
 
 func zoneEnergyStreamsAdvertised(streamTypes []string) bool {
