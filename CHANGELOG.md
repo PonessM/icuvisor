@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Athlete-summary-backed tools now enforce target-athlete row isolation before shaping or aggregation, including full and strict raw response paths.
 - `get_athlete_profile` now exposes exact upstream power-zone percentage ceilings alongside FTP-derived watt ceilings, with explicit field semantics and readiness diagnostics.
 - `get_activity_histogram` now converts intervals.icu power-zone percentage ceilings to FTP-derived watt boundaries, so power samples are assigned to the correctly named configured zone.
 - `compute_zone_energy` now uses the v2 percentage-to-watt formula and attributes power at or above the final configured ceiling to an explicit overflow zone.

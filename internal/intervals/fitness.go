@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/ricardocabral/icuvisor/internal/config"
 )
 
 // AthleteSummaryParams contains date filters for athlete summary rows.
@@ -19,6 +21,7 @@ type AthleteSummaryParams struct {
 type SummaryWithCats struct {
 	Raw map[string]any `json:"-"`
 
+	AthleteID          string            `json:"athlete_id"`
 	Date               string            `json:"date"`
 	Count              int               `json:"count"`
 	Time               int               `json:"time"`
@@ -85,12 +88,32 @@ func (s *CategorySummary) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ListAthleteSummary retrieves daily athlete summary rows for the configured athlete.
+// ListAthleteSummary retrieves athlete summary rows for the request target athlete.
 func (c *Client) ListAthleteSummary(ctx context.Context, params AthleteSummaryParams) ([]SummaryWithCats, error) {
-	query := athleteSummaryQuery(params)
-	var rows []SummaryWithCats
-	if err := c.doJSONQuery(ctx, &rows, query, "athlete", c.athleteID, "athlete-summary.json"); err != nil {
+	targetAthleteID, err := c.athleteSummaryTargetID(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("listing athlete summary: %w", err)
+	}
+	var elements []json.RawMessage
+	if err := c.doJSONQuery(ctx, &elements, athleteSummaryQuery(params), "athlete", c.athleteID, "athlete-summary.json"); err != nil {
+		return nil, fmt.Errorf("listing athlete summary: %w", err)
+	}
+	rows := make([]SummaryWithCats, 0, len(elements))
+	for _, element := range elements {
+		raw, rowAthleteID, owned, err := athleteSummaryElementOwnership(element, targetAthleteID)
+		if err != nil {
+			return nil, fmt.Errorf("listing athlete summary: %w", err)
+		}
+		if !owned {
+			continue
+		}
+		var row SummaryWithCats
+		if err := json.Unmarshal(element, &row); err != nil {
+			return nil, fmt.Errorf("listing athlete summary: decoding target row: %w", err)
+		}
+		row.Raw = raw
+		row.AthleteID = rowAthleteID
+		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -102,28 +125,69 @@ type RawSummaryRow struct {
 	DecodeError string
 }
 
-// ListAthleteSummaryRaw retrieves athlete summary elements without applying typed-field fallback.
+// ListAthleteSummaryRaw retrieves target-athlete summary elements without applying typed-field fallback.
 func (c *Client) ListAthleteSummaryRaw(ctx context.Context, params AthleteSummaryParams) ([]RawSummaryRow, error) {
+	targetAthleteID, err := c.athleteSummaryTargetID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing raw athlete summary: %w", err)
+	}
 	var elements []json.RawMessage
 	if err := c.doJSONQuery(ctx, &elements, athleteSummaryQuery(params), "athlete", c.athleteID, "athlete-summary.json"); err != nil {
 		return nil, fmt.Errorf("listing raw athlete summary: %w", err)
 	}
 	rows := make([]RawSummaryRow, 0, len(elements))
 	for _, element := range elements {
-		row := RawSummaryRow{RawJSON: append(json.RawMessage(nil), element...)}
-		if err := json.Unmarshal(element, &row.Raw); err != nil {
+		raw, _, owned, err := athleteSummaryElementOwnership(element, targetAthleteID)
+		if err != nil {
+			return nil, fmt.Errorf("listing raw athlete summary: %w", err)
+		}
+		if !owned {
+			continue
+		}
+		row := RawSummaryRow{Raw: raw, RawJSON: append(json.RawMessage(nil), element...)}
+		var typed SummaryWithCats
+		if err := json.Unmarshal(element, &typed); err != nil {
 			row.DecodeError = err.Error()
-		} else if row.Raw == nil {
-			row.DecodeError = "summary row is not a JSON object"
-		} else {
-			var typed SummaryWithCats
-			if err := json.Unmarshal(element, &typed); err != nil {
-				row.DecodeError = err.Error()
-			}
 		}
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func (c *Client) athleteSummaryTargetID(ctx context.Context) (string, error) {
+	targetAthleteID := c.athleteID
+	if requestTarget, ok := targetAthleteIDFromContext(ctx); ok {
+		targetAthleteID = requestTarget
+	}
+	normalized, err := config.NormalizeAthleteID(targetAthleteID)
+	if err != nil {
+		return "", ErrTargetAthleteMismatch
+	}
+	return normalized, nil
+}
+
+func athleteSummaryRowOwnedBy(rowAthleteID string, targetAthleteID string) (bool, error) {
+	normalized, err := config.NormalizeAthleteID(rowAthleteID)
+	if err != nil {
+		return false, ErrTargetAthleteMismatch
+	}
+	return normalized == targetAthleteID, nil
+}
+
+func athleteSummaryElementOwnership(element json.RawMessage, targetAthleteID string) (map[string]any, string, bool, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(element, &raw); err != nil || raw == nil {
+		return nil, "", false, ErrTargetAthleteMismatch
+	}
+	athleteID, ok := raw["athlete_id"].(string)
+	if !ok {
+		return nil, "", false, ErrTargetAthleteMismatch
+	}
+	owned, err := athleteSummaryRowOwnedBy(athleteID, targetAthleteID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return raw, athleteID, owned, nil
 }
 
 func athleteSummaryQuery(params AthleteSummaryParams) url.Values {

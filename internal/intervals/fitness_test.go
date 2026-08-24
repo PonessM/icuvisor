@@ -2,6 +2,7 @@ package intervals
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,7 +29,7 @@ func TestFitnessMetricClientEndpoints(t *testing.T) {
 				"end":   "2026-05-07",
 			},
 			wantAbsent: []string{"oldest", "newest"},
-			body:       `[{"date":"2026-05-01","fitness":70,"fatigue":80,"form":-10,"timeInZones":[10,20],"byCategory":[{"category":"Ride","time":3600}]}]`,
+			body:       `[{"athlete_id":"i12345","date":"2026-05-01","fitness":70,"fatigue":80,"form":-10,"timeInZones":[10,20],"byCategory":[{"category":"Ride","time":3600}]}]`,
 			call: func(ctx context.Context, client *Client) error {
 				rows, err := client.ListAthleteSummary(ctx, AthleteSummaryParams{Start: "2026-05-01", End: "2026-05-07"})
 				if err != nil {
@@ -181,6 +182,114 @@ func TestFitnessMetricClientEndpoints(t *testing.T) {
 	}
 }
 
+func TestListAthleteSummaryIsolatesTargetAthlete(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		wantPath    string
+		body        string
+		wantRows    int
+		wantAthlete string
+		wantErr     error
+	}{
+		{
+			name:        "configured athlete filters followed athletes",
+			ctx:         context.Background(),
+			wantPath:    "/athlete/i12345/athlete-summary.json",
+			body:        `[{"athlete_id":"i99999","athlete_name":"Followed Rider","date":"2026-05-01","fitness":99},{"athlete_id":"12345","date":"2026-05-01","fitness":88},{"athlete_id":" I12345 ","date":"2026-05-01","fitness":70}]`,
+			wantRows:    1,
+			wantAthlete: " I12345 ",
+		},
+		{
+			name:        "request scoped coach target filters configured athlete",
+			ctx:         WithTargetAthleteID(context.Background(), "i67890"),
+			wantPath:    "/athlete/i67890/athlete-summary.json",
+			body:        `[{"athlete_id":"i12345","date":"2026-05-01","fitness":70},{"athlete_id":"I67890","date":"2026-05-01","fitness":55}]`,
+			wantRows:    1,
+			wantAthlete: "I67890",
+		},
+		{
+			name:     "missing ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"date":"2026-05-01","fitness":70}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "invalid ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":"not-an-athlete","date":"2026-05-01","fitness":70}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "noncanonical ownership key fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"Athlete_ID":"i12345","date":"2026-05-01","fitness":70}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "non object ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[null]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "canonical foreign ownership overrides case variant target key",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":"i99999","Athlete_ID":"i12345","athlete_name":"Followed Rider","date":"2026-05-01","fitness":99}]`,
+			wantRows: 0,
+		},
+		{
+			name:        "malformed valid foreign row is discarded before typed decode",
+			ctx:         context.Background(),
+			wantPath:    "/athlete/i12345/athlete-summary.json",
+			body:        `[{"athlete_id":"i99999","athlete_name":"Followed Rider","date":"2026-05-01","count":"not-an-integer"},{"athlete_id":"i12345","date":"2026-05-01","fitness":70}]`,
+			wantRows:    1,
+			wantAthlete: "i12345",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.wantPath {
+					t.Fatalf("path = %q, want %q", r.URL.Path, tc.wantPath)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+			rows, err := client.ListAthleteSummary(tc.ctx, AthleteSummaryParams{Start: "2026-05-01", End: "2026-05-01"})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ListAthleteSummary() error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				return
+			}
+			if len(rows) != tc.wantRows {
+				t.Fatalf("ListAthleteSummary() rows = %#v, want %d row(s)", rows, tc.wantRows)
+			}
+			if tc.wantRows > 0 {
+				if got := rows[0].Raw["athlete_id"]; got != tc.wantAthlete {
+					t.Fatalf("retained athlete_id = %#v, want %q", got, tc.wantAthlete)
+				}
+				if _, leaked := rows[0].Raw["athlete_name"]; leaked {
+					t.Fatalf("retained row leaked followed-athlete PII: %#v", rows[0].Raw)
+				}
+			}
+		})
+	}
+}
+
 func assertQueryParams(t *testing.T, r *http.Request, want map[string]string, absent []string) {
 	t.Helper()
 	query := r.URL.Query()
@@ -200,7 +309,7 @@ func TestListAthleteSummaryRawPreservesElementsAndDecodeMarkers(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"date":"2026-05-01","training_load":0,"count":"optional-type-error"},{"date":"2026-05-02","training_load":12.5},null]`))
+		_, _ = w.Write([]byte(`[{"athlete_id":"i12345","date":"2026-05-01","training_load":0,"count":"optional-type-error"},{"athlete_id":"I12345","date":"2026-05-02","training_load":12.5}]`))
 	}))
 	defer server.Close()
 	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
@@ -208,10 +317,123 @@ func TestListAthleteSummaryRawPreservesElementsAndDecodeMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAthleteSummaryRaw() error = %v", err)
 	}
-	if len(rows) != 3 || rows[0].Raw["training_load"] != float64(0) || string(rows[1].RawJSON) != `{"date":"2026-05-02","training_load":12.5}` {
+	if len(rows) != 2 || rows[0].Raw["training_load"] != float64(0) || string(rows[1].RawJSON) != `{"athlete_id":"I12345","date":"2026-05-02","training_load":12.5}` {
 		t.Fatalf("raw rows = %#v", rows)
 	}
-	if rows[0].DecodeError == "" || rows[1].DecodeError == "" || rows[2].DecodeError == "" {
+	if rows[0].DecodeError == "" || rows[1].DecodeError == "" {
 		t.Fatalf("decode markers = %#v, want markers preserved for typed-field errors", rows)
+	}
+}
+
+func TestListAthleteSummaryRawIsolatesTargetAthlete(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		ctx              context.Context
+		wantPath         string
+		body             string
+		wantRows         int
+		wantAthleteID    string
+		wantTrainingLoad float64
+		wantErr          error
+	}{
+		{
+			name:     "filters followed athlete raw rows",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":"i99999","athlete_name":"Followed Rider","date":"2026-05-01","training_load":200},{"athlete_id":"i12345","date":"2026-05-01","training_load":50}]`,
+			wantRows: 1,
+		},
+		{
+			name:             "request scoped coach target filters configured athlete raw rows",
+			ctx:              WithTargetAthleteID(context.Background(), "i67890"),
+			wantPath:         "/athlete/i67890/athlete-summary.json",
+			body:             `[{"athlete_id":"i12345","date":"2026-05-01","training_load":200},{"athlete_id":"I67890","date":"2026-05-01","training_load":50}]`,
+			wantRows:         1,
+			wantAthleteID:    "I67890",
+			wantTrainingLoad: 50,
+		},
+		{
+			name:     "missing ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"date":"2026-05-01","training_load":50}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "invalid ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":12345,"date":"2026-05-01","training_load":50}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "non object ownership fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[null]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "noncanonical ownership key fails closed",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"Athlete_ID":"i12345","date":"2026-05-01","training_load":50}]`,
+			wantErr:  ErrTargetAthleteMismatch,
+		},
+		{
+			name:     "canonical foreign ownership overrides case variant target key",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":"i99999","Athlete_ID":"i12345","athlete_name":"Followed Rider","date":"2026-05-01","training_load":200}]`,
+			wantRows: 0,
+		},
+		{
+			name:     "malformed valid foreign row is discarded before typed marker decode",
+			ctx:      context.Background(),
+			wantPath: "/athlete/i12345/athlete-summary.json",
+			body:     `[{"athlete_id":"i99999","athlete_name":"Followed Rider","date":"2026-05-01","count":"not-an-integer"},{"athlete_id":"i12345","date":"2026-05-01","training_load":50}]`,
+			wantRows: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.wantPath {
+					t.Fatalf("path = %q, want %q", r.URL.Path, tc.wantPath)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+			rows, err := client.ListAthleteSummaryRaw(tc.ctx, AthleteSummaryParams{Start: "2026-05-01", End: "2026-05-01"})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ListAthleteSummaryRaw() error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				return
+			}
+			if len(rows) != tc.wantRows {
+				t.Fatalf("ListAthleteSummaryRaw() rows = %#v, want %d row(s)", rows, tc.wantRows)
+			}
+			if tc.wantRows > 0 {
+				if tc.wantAthleteID != "" {
+					if got := rows[0].Raw["athlete_id"]; got != tc.wantAthleteID {
+						t.Fatalf("raw athlete_id = %#v, want request target %q", got, tc.wantAthleteID)
+					}
+					if got := rows[0].Raw["training_load"]; got != tc.wantTrainingLoad {
+						t.Fatalf("raw training_load = %#v, want request-target value %v", got, tc.wantTrainingLoad)
+					}
+				}
+				if _, leaked := rows[0].Raw["athlete_name"]; leaked {
+					t.Fatalf("raw row leaked followed-athlete PII: %#v", rows[0].Raw)
+				}
+			}
+		})
 	}
 }
