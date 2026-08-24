@@ -40,9 +40,11 @@ type SportSettingsPace struct {
 
 // SportSettingsZoneDefinition contains one replacement zone set for a sport-setting metric.
 type SportSettingsZoneDefinition struct {
-	Kind       string
-	Boundaries []float64
-	Names      []string
+	Kind                             string
+	PowerUpperBoundsPercentOfFTP     []int
+	HRBoundariesBPM                  []int
+	PaceBoundariesPercentOfThreshold []float64
+	Names                            []string
 }
 
 // UpdateSportSettings updates sparse sport settings.
@@ -93,11 +95,16 @@ func (c *Client) ApplySportSettings(ctx context.Context, sportSettingID int) err
 }
 
 func writeSportSettingsBody(params WriteSportSettingsParams) (map[string]any, error) {
+	if params.ZonesProvided && len(params.Zones) == 0 {
+		return nil, fmt.Errorf("updating sport settings: zones must contain at least one definition when provided")
+	}
 	body := map[string]any{}
 	setSportSettingsThresholdFields(body, params.FTP, params.IndoorFTP, params.ThresholdHR, params.ThresholdPace)
 	if params.ZonesProvided {
 		for _, zone := range params.Zones {
-			applySportSettingsZone(body, zone)
+			if err := applySportSettingsZone(body, zone); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(body) == 0 {
@@ -151,31 +158,49 @@ func setSportSettingsThresholdFields(body map[string]any, ftp *int, indoorFTP *i
 	}
 }
 
-func applySportSettingsZone(body map[string]any, zone SportSettingsZoneDefinition) {
+func applySportSettingsZone(body map[string]any, zone SportSettingsZoneDefinition) error {
 	kind := strings.ToLower(strings.TrimSpace(zone.Kind))
 	switch kind {
 	case "power":
-		body["power_zones"] = roundedZoneBoundaries(zone.Boundaries)
+		if len(zone.PowerUpperBoundsPercentOfFTP) == 0 || len(zone.HRBoundariesBPM) != 0 || len(zone.PaceBoundariesPercentOfThreshold) != 0 {
+			return fmt.Errorf("updating sport settings: power zone definition must contain only nonempty power percentage ceilings")
+		}
+		for i, boundary := range zone.PowerUpperBoundsPercentOfFTP {
+			if boundary <= 0 || (i > 0 && boundary <= zone.PowerUpperBoundsPercentOfFTP[i-1]) {
+				return fmt.Errorf("updating sport settings: power zone ceilings must be positive and strictly increasing")
+			}
+		}
+		if len(zone.Names) > 0 && len(zone.Names) != len(zone.PowerUpperBoundsPercentOfFTP) {
+			return fmt.Errorf("updating sport settings: power zone names must match ceiling count")
+		}
+		body["power_zones"] = append([]int(nil), zone.PowerUpperBoundsPercentOfFTP...)
 		if len(zone.Names) > 0 {
 			body["power_zone_names"] = append([]string(nil), zone.Names...)
 		}
 	case "hr", "heart_rate":
-		body["hr_zones"] = roundedZoneBoundaries(zone.Boundaries)
+		if len(zone.HRBoundariesBPM) == 0 || len(zone.PowerUpperBoundsPercentOfFTP) != 0 || len(zone.PaceBoundariesPercentOfThreshold) != 0 {
+			return fmt.Errorf("updating sport settings: HR zone definition must contain only nonempty bpm boundaries")
+		}
+		if len(zone.Names) > 0 && len(zone.Names) != len(zone.HRBoundariesBPM) {
+			return fmt.Errorf("updating sport settings: HR zone names must match boundary count")
+		}
+		body["hr_zones"] = append([]int(nil), zone.HRBoundariesBPM...)
 		if len(zone.Names) > 0 {
 			body["hr_zone_names"] = append([]string(nil), zone.Names...)
 		}
 	case "pace":
-		body["pace_zones"] = append([]float64(nil), zone.Boundaries...)
+		if len(zone.PaceBoundariesPercentOfThreshold) == 0 || len(zone.PowerUpperBoundsPercentOfFTP) != 0 || len(zone.HRBoundariesBPM) != 0 {
+			return fmt.Errorf("updating sport settings: pace zone definition must contain only nonempty percentage boundaries")
+		}
+		if len(zone.Names) > 0 && len(zone.Names) != len(zone.PaceBoundariesPercentOfThreshold) {
+			return fmt.Errorf("updating sport settings: pace zone names must match boundary count")
+		}
+		body["pace_zones"] = append([]float64(nil), zone.PaceBoundariesPercentOfThreshold...)
 		if len(zone.Names) > 0 {
 			body["pace_zone_names"] = append([]string(nil), zone.Names...)
 		}
+	default:
+		return fmt.Errorf("updating sport settings: zone kind must be power, hr, or pace")
 	}
-}
-
-func roundedZoneBoundaries(values []float64) []int {
-	out := make([]int, 0, len(values))
-	for _, value := range values {
-		out = append(out, int(value))
-	}
-	return out
+	return nil
 }

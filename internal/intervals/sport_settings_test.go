@@ -3,6 +3,7 @@ package intervals
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -291,14 +292,88 @@ func TestUpdateSportSettingsSendsZoneOverwriteFieldsWhenProvided(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL, server.Client(), RetryConfig{MaxAttempts: 1})
-	_, err := client.UpdateSportSettings(context.Background(), WriteSportSettingsParams{SportSettingID: 7, RecalcHRZones: true, ZonesProvided: true, Zones: []SportSettingsZoneDefinition{{Kind: "power", Boundaries: []float64{100.2, 200.8}, Names: []string{"Z1", "Z2"}}}})
+	_, err := client.UpdateSportSettings(context.Background(), WriteSportSettingsParams{SportSettingID: 7, RecalcHRZones: true, ZonesProvided: true, Zones: []SportSettingsZoneDefinition{{Kind: "power", PowerUpperBoundsPercentOfFTP: []int{55, 75, 90, 105, 120, 150, 999}, Names: []string{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"}}}})
 	if err != nil {
 		t.Fatalf("UpdateSportSettings() error = %v", err)
 	}
-	if got := updateBody["power_zones"].([]any); len(got) != 2 || got[0] != float64(100) || got[1] != float64(200) {
-		t.Fatalf("power_zones = %#v, want rounded integer boundaries", updateBody["power_zones"])
+	if got := updateBody["power_zones"].([]any); len(got) != 7 || got[0] != float64(55) || got[6] != float64(999) {
+		t.Fatalf("power_zones = %#v, want exact integer percentages", updateBody["power_zones"])
 	}
-	if got := updateBody["power_zone_names"].([]any); len(got) != 2 || got[0] != "Z1" || got[1] != "Z2" {
+	if got := updateBody["power_zone_names"].([]any); len(got) != 7 || got[0] != "Active Recovery" || got[6] != "Neuromuscular" {
 		t.Fatalf("power_zone_names = %#v", updateBody["power_zone_names"])
+	}
+}
+
+func TestUpdateSportSettingsSendsTypedZoneJSON(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		zone SportSettingsZoneDefinition
+		want string
+	}{
+		{name: "power percentages", zone: SportSettingsZoneDefinition{Kind: "power", PowerUpperBoundsPercentOfFTP: []int{55, 75, 90, 105, 120, 150, 999}}, want: `{"power_zones":[55,75,90,105,120,150,999]}`},
+		{name: "HR integers", zone: SportSettingsZoneDefinition{Kind: "hr", HRBoundariesBPM: []int{0, 120}}, want: `{"hr_zones":[0,120]}`},
+		{name: "pace decimals", zone: SportSettingsZoneDefinition{Kind: "pace", PaceBoundariesPercentOfThreshold: []float64{77.5, 100}}, want: `{"pace_zones":[77.5,100]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read request body: %v", err)
+				}
+				if got := string(body); got != tc.want {
+					t.Fatalf("request body = %s, want %s", got, tc.want)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":7,"type":"Ride"}`))
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL, server.Client(), RetryConfig{MaxAttempts: 1})
+			if _, err := client.UpdateSportSettings(context.Background(), WriteSportSettingsParams{SportSettingID: 7, ZonesProvided: true, Zones: []SportSettingsZoneDefinition{tc.zone}}); err != nil {
+				t.Fatalf("UpdateSportSettings() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateSportSettingsRejectsMalformedZonesBeforeHTTP(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatal("invalid zone definitions must not make an HTTP request")
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{MaxAttempts: 1})
+	for _, tc := range []struct {
+		name string
+		zone SportSettingsZoneDefinition
+	}{
+		{name: "empty power", zone: SportSettingsZoneDefinition{Kind: "power"}},
+		{name: "nonpositive power", zone: SportSettingsZoneDefinition{Kind: "power", PowerUpperBoundsPercentOfFTP: []int{0, 75}}},
+		{name: "duplicate power", zone: SportSettingsZoneDefinition{Kind: "power", PowerUpperBoundsPercentOfFTP: []int{55, 55}}},
+		{name: "descending power", zone: SportSettingsZoneDefinition{Kind: "power", PowerUpperBoundsPercentOfFTP: []int{75, 55}}},
+		{name: "wrong field for power", zone: SportSettingsZoneDefinition{Kind: "power", HRBoundariesBPM: []int{100, 120}}},
+		{name: "wrong field for hr", zone: SportSettingsZoneDefinition{Kind: "hr", PaceBoundariesPercentOfThreshold: []float64{77.5, 100}}},
+		{name: "wrong field for pace", zone: SportSettingsZoneDefinition{Kind: "pace", PowerUpperBoundsPercentOfFTP: []int{55, 75}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.UpdateSportSettings(context.Background(), WriteSportSettingsParams{SportSettingID: 7, ZonesProvided: true, Zones: []SportSettingsZoneDefinition{tc.zone}})
+			if err == nil || !strings.Contains(err.Error(), "sport settings") {
+				t.Fatalf("UpdateSportSettings() error = %v, want validation error", err)
+			}
+		})
+	}
+	ftp := 250
+	_, err := client.UpdateSportSettings(context.Background(), WriteSportSettingsParams{SportSettingID: 7, FTP: &ftp, ZonesProvided: true})
+	if err == nil || !strings.Contains(err.Error(), "zone") {
+		t.Fatalf("UpdateSportSettings() error = %v, want empty zone-list validation error", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0", requests)
 	}
 }

@@ -11,9 +11,10 @@ import (
 )
 
 type updateSportSettingsZoneRequest struct {
-	Kind       string    `json:"kind"`
-	Boundaries []float64 `json:"boundaries"`
-	Names      []string  `json:"names,omitempty"`
+	Kind          string    `json:"kind"`
+	Boundaries    []float64 `json:"boundaries"`
+	Names         []string  `json:"names,omitempty"`
+	namesProvided bool
 }
 
 type updateSportSettingsZoneEcho struct {
@@ -46,8 +47,22 @@ func validateSportSettingsZones(zones []updateSportSettingsZoneRequest) error {
 		if len(zone.Boundaries) == 0 {
 			return fmt.Errorf("%s zone boundaries are required", kind)
 		}
+		if zone.namesProvided && len(zone.Names) == 0 {
+			return fmt.Errorf("%s zone names must be a nonempty array when supplied", kind)
+		}
 		if len(zone.Names) > 0 && len(zone.Names) != len(zone.Boundaries) {
 			return fmt.Errorf("%s zone names must match boundaries length", kind)
+		}
+		if kind == "power" {
+			for index, boundary := range zone.Boundaries {
+				if math.IsNaN(boundary) || math.IsInf(boundary, 0) || boundary <= 0 || boundary != math.Trunc(boundary) {
+					return errors.New("power zone boundaries must be finite positive integer percentages of FTP")
+				}
+				if index > 0 && boundary <= zone.Boundaries[index-1] {
+					return errors.New("power zone boundaries must be strictly increasing percentages of FTP")
+				}
+			}
+			continue
 		}
 		for index, boundary := range zone.Boundaries {
 			if kind == "pace" {
@@ -70,7 +85,16 @@ func validateSportSettingsZones(zones []updateSportSettingsZoneRequest) error {
 func sportSettingsZoneDefinitions(zones []updateSportSettingsZoneRequest) []intervals.SportSettingsZoneDefinition {
 	definitions := make([]intervals.SportSettingsZoneDefinition, 0, len(zones))
 	for _, zone := range zones {
-		definitions = append(definitions, intervals.SportSettingsZoneDefinition{Kind: normalizeZoneKind(zone.Kind), Boundaries: append([]float64(nil), zone.Boundaries...), Names: append([]string(nil), zone.Names...)})
+		definition := intervals.SportSettingsZoneDefinition{Kind: normalizeZoneKind(zone.Kind), Names: append([]string(nil), zone.Names...)}
+		switch definition.Kind {
+		case "power":
+			definition.PowerUpperBoundsPercentOfFTP = sportSettingsIntegerBoundaries(zone.Boundaries)
+		case "hr":
+			definition.HRBoundariesBPM = sportSettingsIntegerBoundaries(zone.Boundaries)
+		case "pace":
+			definition.PaceBoundariesPercentOfThreshold = append([]float64(nil), zone.Boundaries...)
+		}
+		definitions = append(definitions, definition)
 	}
 	return definitions
 }
@@ -78,9 +102,32 @@ func sportSettingsZoneDefinitions(zones []updateSportSettingsZoneRequest) []inte
 func sportSettingsZoneEchoes(zones []intervals.SportSettingsZoneDefinition) []updateSportSettingsZoneEcho {
 	echoes := make([]updateSportSettingsZoneEcho, 0, len(zones))
 	for _, zone := range zones {
-		echoes = append(echoes, updateSportSettingsZoneEcho{Kind: zone.Kind, Boundaries: append([]float64(nil), zone.Boundaries...), Names: append([]string(nil), zone.Names...)})
+		boundaries := append([]float64(nil), zone.PaceBoundariesPercentOfThreshold...)
+		if zone.Kind == "power" {
+			boundaries = sportSettingsFloatBoundaries(zone.PowerUpperBoundsPercentOfFTP)
+		}
+		if zone.Kind == "hr" || zone.Kind == "heart_rate" {
+			boundaries = sportSettingsFloatBoundaries(zone.HRBoundariesBPM)
+		}
+		echoes = append(echoes, updateSportSettingsZoneEcho{Kind: zone.Kind, Boundaries: boundaries, Names: append([]string(nil), zone.Names...)})
 	}
 	return echoes
+}
+
+func sportSettingsIntegerBoundaries(values []float64) []int {
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		out = append(out, int(value))
+	}
+	return out
+}
+
+func sportSettingsFloatBoundaries(values []int) []float64 {
+	out := make([]float64, 0, len(values))
+	for _, value := range values {
+		out = append(out, float64(value))
+	}
+	return out
 }
 
 func normalizeZoneKind(value string) string {

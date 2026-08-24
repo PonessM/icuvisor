@@ -160,6 +160,9 @@ func decodeUpdateSportSettingsRequest(raw json.RawMessage) (updateSportSettingsR
 		return args, err
 	}
 	if zonesProvided {
+		if err := markSportSettingsZoneNamePresence(raw, args.Zones); err != nil {
+			return args, err
+		}
 		if err := validateSportSettingsZones(args.Zones); err != nil {
 			return args, err
 		}
@@ -168,6 +171,36 @@ func decodeUpdateSportSettingsRequest(raw json.RawMessage) (updateSportSettingsR
 		return args, errors.New("at least one writable sport-settings field is required")
 	}
 	return args, nil
+}
+
+func markSportSettingsZoneNamePresence(raw json.RawMessage, zones []updateSportSettingsZoneRequest) error {
+	fields, err := rawSportSettingsObjectFields(raw)
+	if err != nil {
+		return err
+	}
+	zonesRaw, ok := fields["zones"]
+	if !ok || bytes.Equal(bytes.TrimSpace(zonesRaw), []byte("null")) {
+		return nil
+	}
+	var rawZones []json.RawMessage
+	if err := json.Unmarshal(zonesRaw, &rawZones); err != nil {
+		return err
+	}
+	if len(rawZones) != len(zones) {
+		return errors.New("zones must be an array")
+	}
+	for i, rawZone := range rawZones {
+		var zoneFields map[string]json.RawMessage
+		if err := json.Unmarshal(rawZone, &zoneFields); err != nil {
+			return err
+		}
+		namesRaw, namesProvided := zoneFields["names"]
+		zones[i].namesProvided = namesProvided
+		if namesProvided && bytes.Equal(bytes.TrimSpace(namesRaw), []byte("null")) {
+			return errors.New("zone names must not be null when supplied")
+		}
+	}
+	return nil
 }
 
 func rawObjectHasField(raw json.RawMessage, field string) (bool, error) {
@@ -236,9 +269,24 @@ func sportSettingsWriteParams(args updateSportSettingsRequest, setting intervals
 		meta.PaceLoadType = paceLoadType
 	}
 	if args.zonesProvided {
+		if err := validateOmittedPowerZoneNames(args.Zones, setting); err != nil {
+			return params, meta, err
+		}
 		params.Zones = sportSettingsZoneDefinitions(args.Zones)
 	}
 	return params, meta, nil
+}
+
+func validateOmittedPowerZoneNames(zones []updateSportSettingsZoneRequest, setting intervals.SportSettings) error {
+	for _, zone := range zones {
+		if normalizeZoneKind(zone.Kind) != "power" || zone.namesProvided || len(setting.PowerZoneNames) == 0 {
+			continue
+		}
+		if len(setting.PowerZoneNames) != len(zone.Boundaries) {
+			return errors.New("power zone names must be supplied because existing names do not match the replacement ceiling count")
+		}
+	}
+	return nil
 }
 
 func updateSportSettingsFieldsUpdated(args updateSportSettingsRequest) []string {
@@ -498,8 +546,8 @@ func updateSportSettingsInputSchema() map[string]any {
 		}},
 		"zones": map[string]any{"type": "array", "description": "Optional destructive replacement zone definitions. Supplying zones overwrites prior power/hr/pace zone definitions for this sport and is rejected unless ICUVISOR_DELETE_MODE=full.", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "boundaries"}, "properties": map[string]any{
 			"kind":       map[string]any{"type": "string", "enum": []string{"power", "hr", "pace"}, "description": "Zone family to overwrite."},
-			"boundaries": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "number", "minimum": 0}, "description": "Ordered zone boundary values: watts for power, bpm for hr, and strictly increasing percent-of-threshold-pace values in (0, 200] for pace. For pace, 100 means threshold pace; values such as 77.5 and 100 are percentages, never durations."},
-			"names":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional zone names; when supplied, length must match boundaries."},
+			"boundaries": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "number", "minimum": 0}, "description": "Ordered zone boundaries: power uses positive, strictly increasing integer percent-of-FTP upper ceilings; hr uses bpm; pace uses strictly increasing percent-of-threshold-pace values in (0, 200]. For pace, 100 means threshold pace; values such as 77.5 and 100 are percentages, never durations."},
+			"names":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional zone names; omission preserves existing names when compatible, while a supplied nonempty array must match boundaries."},
 		}}},
 	}}
 }
@@ -532,7 +580,7 @@ func updateSportSettingsInputExamples() []map[string]any {
 			"ftp":             290,
 			"threshold_hr":    168,
 			"zones": []any{
-				map[string]any{"kind": "power", "boundaries": []any{150, 200, 250, 300}, "names": []any{"Endurance", "Tempo", "Threshold", "VO2"}},
+				map[string]any{"kind": "power", "boundaries": []any{55, 75, 90, 105, 120, 150, 999}, "names": []any{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"}},
 			},
 		},
 	}
