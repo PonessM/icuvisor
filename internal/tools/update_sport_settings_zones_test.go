@@ -171,6 +171,18 @@ func TestUpdateSportSettingsPowerZonesValidateNamesBeforeWriter(t *testing.T) {
 			arguments:  `{"sport":"Ride","zones":[{"kind":"power","boundaries":[55,75],"names":[]}]}`,
 			wantWriter: false,
 		},
+		{
+			name:       "case insensitive null names",
+			setting:    intervals.SportSettings{ID: 7, Types: []string{"Ride"}},
+			arguments:  `{"sport":"Ride","zones":[{"kind":"power","boundaries":[55,75],"Names":null}]}`,
+			wantWriter: false,
+		},
+		{
+			name:       "case insensitive empty names",
+			setting:    intervals.SportSettings{ID: 7, Types: []string{"Ride"}},
+			arguments:  `{"sport":"Ride","zones":[{"kind":"power","boundaries":[55,75],"Names":[]}]}`,
+			wantWriter: false,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -178,7 +178,10 @@ func markSportSettingsZoneNamePresence(raw json.RawMessage, zones []updateSportS
 	if err != nil {
 		return err
 	}
-	zonesRaw, ok := fields["zones"]
+	zonesRaw, ok, err := rawObjectCaseInsensitiveField(fields, "zones")
+	if err != nil {
+		return err
+	}
 	if !ok || bytes.Equal(bytes.TrimSpace(zonesRaw), []byte("null")) {
 		return nil
 	}
@@ -194,7 +197,10 @@ func markSportSettingsZoneNamePresence(raw json.RawMessage, zones []updateSportS
 		if err := json.Unmarshal(rawZone, &zoneFields); err != nil {
 			return err
 		}
-		namesRaw, namesProvided := zoneFields["names"]
+		namesRaw, namesProvided, err := rawObjectCaseInsensitiveField(zoneFields, "names")
+		if err != nil {
+			return err
+		}
 		zones[i].namesProvided = namesProvided
 		if namesProvided && bytes.Equal(bytes.TrimSpace(namesRaw), []byte("null")) {
 			return errors.New("zone names must not be null when supplied")
@@ -208,7 +214,10 @@ func rawObjectHasField(raw json.RawMessage, field string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, ok := fields[field]
+	_, ok, err := rawObjectCaseInsensitiveField(fields, field)
+	if err != nil {
+		return false, err
+	}
 	return ok, nil
 }
 
@@ -217,8 +226,27 @@ func rawObjectFieldIsNull(raw json.RawMessage, field string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	value, ok := fields[field]
+	value, ok, err := rawObjectCaseInsensitiveField(fields, field)
+	if err != nil {
+		return false, err
+	}
 	return ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")), nil
+}
+
+func rawObjectCaseInsensitiveField(fields map[string]json.RawMessage, field string) (json.RawMessage, bool, error) {
+	var value json.RawMessage
+	found := false
+	for key, candidate := range fields {
+		if !strings.EqualFold(key, field) {
+			continue
+		}
+		if found {
+			return nil, false, fmt.Errorf("duplicate case-insensitive %q field", field)
+		}
+		value = candidate
+		found = true
+	}
+	return value, found, nil
 }
 
 func rawSportSettingsObjectFields(raw json.RawMessage) (map[string]json.RawMessage, error) {
