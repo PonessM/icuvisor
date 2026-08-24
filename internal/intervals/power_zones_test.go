@@ -42,6 +42,32 @@ func TestNormalizePowerZones(t *testing.T) {
 			wantCode: PowerZoneValid,
 		},
 		{
+			name:     "trims configured names and replaces blank names",
+			ftpWatts: 200,
+			ceilings: []int{50, 100},
+			names:    []string{" ", " Hard "},
+			want: NormalizedPowerZones{
+				UpperBoundsPercentOfFTP:  []int{50, 100},
+				UpperBoundsWatts:         []float64{100, 200},
+				AnalyzerLowerBoundsWatts: []float64{0, 100, 200},
+				AnalyzerNames:            []string{"Zone 1", "Hard", "Above Hard"},
+			},
+			wantCode: PowerZoneValid,
+		},
+		{
+			name:     "replaces blank final name before constructing overflow",
+			ftpWatts: 200,
+			ceilings: []int{50, 100},
+			names:    []string{" Easy ", "\t"},
+			want: NormalizedPowerZones{
+				UpperBoundsPercentOfFTP:  []int{50, 100},
+				UpperBoundsWatts:         []float64{100, 200},
+				AnalyzerLowerBoundsWatts: []float64{0, 100, 200},
+				AnalyzerNames:            []string{"Easy", "Zone 2", "Above Zone 2"},
+			},
+			wantCode: PowerZoneValid,
+		},
+		{
 			name:     "rejects empty ceilings",
 			ftpWatts: 200,
 			want:     NormalizedPowerZones{},

@@ -47,7 +47,7 @@ func validateSportSettingsZones(zones []updateSportSettingsZoneRequest) error {
 		if len(zone.Boundaries) == 0 {
 			return fmt.Errorf("%s zone boundaries are required", kind)
 		}
-		if zone.namesProvided && len(zone.Names) == 0 {
+		if kind == "power" && zone.namesProvided && len(zone.Names) == 0 {
 			return fmt.Errorf("%s zone names must be a nonempty array when supplied", kind)
 		}
 		if len(zone.Names) > 0 && len(zone.Names) != len(zone.Boundaries) {

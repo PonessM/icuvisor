@@ -229,7 +229,7 @@
             "type": "string"
           },
           "names": {
-            "description": "Optional zone names; omission preserves existing names when compatible, while a supplied nonempty array must match boundaries.",
+            "description": "Optional zone names. For power, omission preserves compatible existing names; explicit null or an empty array is rejected, and a supplied nonempty array must match boundaries. For hr and pace, null or an empty array writes boundaries without names; a nonempty array must match boundaries.",
             "items": {
               "type": "string"
             },

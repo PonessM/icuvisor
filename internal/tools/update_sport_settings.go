@@ -202,8 +202,8 @@ func markSportSettingsZoneNamePresence(raw json.RawMessage, zones []updateSportS
 			return err
 		}
 		zones[i].namesProvided = namesProvided
-		if namesProvided && bytes.Equal(bytes.TrimSpace(namesRaw), []byte("null")) {
-			return errors.New("zone names must not be null when supplied")
+		if normalizeZoneKind(zones[i].Kind) == "power" && namesProvided && bytes.Equal(bytes.TrimSpace(namesRaw), []byte("null")) {
+			return errors.New("power zone names must not be null when supplied")
 		}
 	}
 	return nil
@@ -575,7 +575,7 @@ func updateSportSettingsInputSchema() map[string]any {
 		"zones": map[string]any{"type": "array", "description": "Optional destructive replacement zone definitions. Supplying zones overwrites prior power/hr/pace zone definitions for this sport and is rejected unless ICUVISOR_DELETE_MODE=full.", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "boundaries"}, "properties": map[string]any{
 			"kind":       map[string]any{"type": "string", "enum": []string{"power", "hr", "pace"}, "description": "Zone family to overwrite."},
 			"boundaries": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "number", "minimum": 0}, "description": "Ordered zone boundaries: power uses positive, strictly increasing integer percent-of-FTP upper ceilings; hr uses bpm; pace uses strictly increasing percent-of-threshold-pace values in (0, 200]. For pace, 100 means threshold pace; values such as 77.5 and 100 are percentages, never durations."},
-			"names":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional zone names; omission preserves existing names when compatible, while a supplied nonempty array must match boundaries."},
+			"names":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional zone names. For power, omission preserves compatible existing names; explicit null or an empty array is rejected, and a supplied nonempty array must match boundaries. For hr and pace, null or an empty array writes boundaries without names; a nonempty array must match boundaries."},
 		}}},
 	}}
 }

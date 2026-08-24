@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -113,6 +114,67 @@ func TestSportSettingsHRZonesRetainFloatToIntegerConversion(t *testing.T) {
 	definitions := sportSettingsZoneDefinitions(zones)
 	if got := definitions[0].HRBoundariesBPM; !equalInts(got, []int{0, 120}) {
 		t.Fatalf("HR boundaries = %v, want existing integer conversion", got)
+	}
+}
+
+func TestUpdateSportSettingsHRAndPaceAllowExplicitNoNameWrites(t *testing.T) {
+	tests := []struct {
+		name       string
+		arguments  string
+		kind       string
+		boundaries []float64
+	}{
+		{
+			name:       "HR null names",
+			arguments:  `{"sport":"Run","zones":[{"kind":"hr","boundaries":[0,120],"names":null}]}`,
+			kind:       "hr",
+			boundaries: []float64{0, 120},
+		},
+		{
+			name:       "HR empty names",
+			arguments:  `{"sport":"Run","zones":[{"kind":"hr","boundaries":[0,120],"names":[]}]}`,
+			kind:       "hr",
+			boundaries: []float64{0, 120},
+		},
+		{
+			name:       "pace null names",
+			arguments:  `{"sport":"Run","zones":[{"kind":"pace","boundaries":[77.5,100],"names":null}]}`,
+			kind:       "pace",
+			boundaries: []float64{77.5, 100},
+		},
+		{
+			name:       "pace empty names",
+			arguments:  `{"sport":"Run","zones":[{"kind":"pace","boundaries":[77.5,100],"names":[]}]}`,
+			kind:       "pace",
+			boundaries: []float64{77.5, 100},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newFakeSportSettingsClient(intervals.SportSettings{ID: 7, Types: []string{"Run"}})
+			client.setting = intervals.SportSettings{ID: 7, Type: "Run"}
+			tool := newUpdateSportSettingsTool(client, client, "test", "UTC", false, safety.NewCapability(safety.ModeFull))
+
+			_, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(tc.arguments)})
+			if err != nil {
+				t.Fatalf("Handler() error = %v", err)
+			}
+			if len(client.calls) != 1 || len(client.calls[0].Zones) != 1 {
+				t.Fatalf("writer calls = %#v, want one zone write", client.calls)
+			}
+			zone := client.calls[0].Zones[0]
+			if zone.Kind != tc.kind || len(zone.Names) != 0 {
+				t.Fatalf("zone = %#v, want %s write without names", zone, tc.kind)
+			}
+			gotBoundaries := zone.PaceBoundariesPercentOfThreshold
+			if tc.kind == "hr" {
+				gotBoundaries = sportSettingsFloatBoundaries(zone.HRBoundariesBPM)
+			}
+			if !reflect.DeepEqual(gotBoundaries, tc.boundaries) {
+				t.Fatalf("boundaries = %#v, want %#v", gotBoundaries, tc.boundaries)
+			}
+		})
 	}
 }
 

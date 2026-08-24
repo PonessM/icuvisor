@@ -223,7 +223,7 @@ func sportReadinessWarnings(setting intervals.SportSettings, powerZoneCode inter
 		}
 		switch powerZoneCode {
 		case intervals.PowerZoneMissingZones:
-			warnings = append(warnings, readinessWarning("missing_power_zones", sportTypes, "power_zones_watts", "power zones are missing for this sport", "Use update_sport_settings with zones kind=power for this sport before zone-based planning."))
+			warnings = append(warnings, readinessWarning("missing_power_zones", sportTypes, "power_zones_percent_of_ftp", "power zones are missing for this sport", "Use update_sport_settings with zones kind=power for this sport before zone-based planning."))
 		case intervals.PowerZoneInvalidCeilings:
 			warnings = append(warnings, readinessWarning("invalid_power_zone_ceilings", sportTypes, "power_zones_percent_of_ftp", "power-zone ceilings are invalid for this sport", "Use update_sport_settings with positive, strictly increasing power-zone ceilings for this sport."))
 		case intervals.PowerZoneMismatchedNames:

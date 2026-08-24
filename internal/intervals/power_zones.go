@@ -1,6 +1,9 @@
 package intervals
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // PowerZoneValidationCode identifies why power zones cannot be normalized.
 type PowerZoneValidationCode string
@@ -55,11 +58,14 @@ func NormalizePowerZones(ftpWatts int, upperBoundsPercentOfFTP []int, names []st
 		watts := float64(ftpWatts) * float64(ceiling) / 100
 		result.UpperBoundsWatts[i] = watts
 		result.AnalyzerLowerBoundsWatts = append(result.AnalyzerLowerBoundsWatts, watts)
-		if len(names) == 0 {
-			result.AnalyzerNames = append(result.AnalyzerNames, fmt.Sprintf("Zone %d", i+1))
-			continue
+		name := ""
+		if len(names) > 0 {
+			name = strings.TrimSpace(names[i])
 		}
-		result.AnalyzerNames = append(result.AnalyzerNames, names[i])
+		if name == "" {
+			name = fmt.Sprintf("Zone %d", i+1)
+		}
+		result.AnalyzerNames = append(result.AnalyzerNames, name)
 	}
 	result.AnalyzerNames = append(result.AnalyzerNames, "Above "+result.AnalyzerNames[len(result.AnalyzerNames)-1])
 

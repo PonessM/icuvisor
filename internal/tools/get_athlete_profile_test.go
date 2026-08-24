@@ -260,6 +260,12 @@ func TestGetAthleteProfilePowerZoneReadinessWarningsPreserveRawPercentages(t *te
 			wantWarningField: "power_zones_percent_of_ftp",
 		},
 		{
+			name:             "missing ceilings",
+			ftp:              228,
+			wantWarningCode:  "missing_power_zones",
+			wantWarningField: "power_zones_percent_of_ftp",
+		},
+		{
 			name:             "mismatched names",
 			ftp:              228,
 			ceilings:         []int{55, 75, 90},
@@ -300,7 +306,11 @@ func TestGetAthleteProfilePowerZoneReadinessWarningsPreserveRawPercentages(t *te
 			for i, ceiling := range tc.ceilings {
 				wantPercentages[i] = float64(ceiling)
 			}
-			if got := sport["power_zones_percent_of_ftp"]; !reflect.DeepEqual(got, wantPercentages) {
+			if len(tc.ceilings) > 0 {
+				if got := sport["power_zones_percent_of_ftp"]; !reflect.DeepEqual(got, wantPercentages) {
+					t.Fatalf("power_zones_percent_of_ftp = %#v, want %#v", got, wantPercentages)
+				}
+			} else if got, ok := sport["power_zones_percent_of_ftp"]; ok {
 				t.Fatalf("power_zones_percent_of_ftp = %#v, want %#v", got, wantPercentages)
 			}
 			_, hasWatts := sport["power_zones_watts"]
