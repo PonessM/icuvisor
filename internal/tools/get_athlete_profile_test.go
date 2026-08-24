@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,23 +128,23 @@ func TestGetAthleteProfileHandlerSuccess(t *testing.T) {
 		Timezone:              "America/Sao_Paulo",
 		Locale:                "pt_BR",
 		SportSettings: []intervals.SportSettings{{
-			ID:             7,
-			AthleteID:      "i12345",
-			Types:          []string{"Ride"},
-			FTP:            250,
-			IndoorFTP:      240,
-			WPrime:         20000,
-			PMax:           900,
+			ID:                               7,
+			AthleteID:                        "i12345",
+			Types:                            []string{"Ride"},
+			FTP:                              250,
+			IndoorFTP:                        240,
+			WPrime:                           20000,
+			PMax:                             900,
 			PowerZoneUpperBoundsPercentOfFTP: []int{100, 150, 200},
-			PowerZoneNames: []string{"Z1", "Z2", "Z3"},
-			LTHR:           170,
-			MaxHR:          190,
-			HRZones:        []int{120, 140, 160},
-			HRZoneNames:    []string{"Z1", "Z2", "Z3"},
-			ThresholdPace:  3.5714285,
-			PaceUnits:      "MINS_KM",
-			PaceZones:      []float64{77.5, 90, 100},
-			PaceZoneNames:  []string{"Z1", "Z2", "Z3"},
+			PowerZoneNames:                   []string{"Z1", "Z2", "Z3"},
+			LTHR:                             170,
+			MaxHR:                            190,
+			HRZones:                          []int{120, 140, 160},
+			HRZoneNames:                      []string{"Z1", "Z2", "Z3"},
+			ThresholdPace:                    3.5714285,
+			PaceUnits:                        "MINS_KM",
+			PaceZones:                        []float64{77.5, 90, 100},
+			PaceZoneNames:                    []string{"Z1", "Z2", "Z3"},
 		}},
 	})
 
@@ -195,17 +196,143 @@ func TestGetAthleteProfileHandlerSuccess(t *testing.T) {
 	}
 }
 
+func TestGetAthleteProfilePublishesPowerZonePercentageCeilingsAndDerivedWatts(t *testing.T) {
+	t.Parallel()
+
+	response := newGetAthleteProfileResponse(intervals.AthleteWithSportSettings{
+		ID: "i12345",
+		SportSettings: []intervals.SportSettings{{
+			Types:                            []string{"Ride"},
+			FTP:                              228,
+			PowerZoneUpperBoundsPercentOfFTP: []int{55, 75, 90, 105, 120, 150, 999},
+			PowerZoneNames:                   []string{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"},
+		}},
+	}, "test", "UTC")
+
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal profile response: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode profile response: %v", err)
+	}
+	sport := payload["sport_settings"].([]any)[0].(map[string]any)
+	if got, want := sport["power_zones_percent_of_ftp"], []any{float64(55), float64(75), float64(90), float64(105), float64(120), float64(150), float64(999)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zones_percent_of_ftp = %#v, want %#v", got, want)
+	}
+	if got, want := sport["power_zones_watts"], []any{125.4, 171.0, 205.2, 239.4, 273.6, 342.0, 2277.72}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zones_watts = %#v, want %#v", got, want)
+	}
+	if got, want := sport["power_zone_names"], []any{"Active Recovery", "Endurance", "Tempo", "Threshold", "VO2 Max", "Anaerobic", "Neuromuscular"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("power_zone_names = %#v, want %#v", got, want)
+	}
+	if !strings.Contains(response.Meta.ZoneBoundaryConvention, "upper ceilings") || !strings.Contains(response.Meta.ZoneBoundaryConvention, "exact upstream integers") || !strings.Contains(response.Meta.ZoneBoundaryConvention, "FTP-derived floats") {
+		t.Fatalf("zone boundary convention = %q", response.Meta.ZoneBoundaryConvention)
+	}
+}
+
+func TestGetAthleteProfilePowerZoneReadinessWarningsPreserveRawPercentages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		ftp              int
+		ceilings         []int
+		names            []string
+		wantWarningCode  string
+		wantWarningField string
+		wantWatts        bool
+	}{
+		{
+			name:             "missing FTP",
+			ceilings:         []int{55, 75, 90},
+			names:            []string{"Z1", "Z2", "Z3"},
+			wantWarningCode:  "missing_power_threshold",
+			wantWarningField: "ftp_watts",
+		},
+		{
+			name:             "invalid ceilings",
+			ftp:              228,
+			ceilings:         []int{55, 0, 90},
+			names:            []string{"Z1", "Z2", "Z3"},
+			wantWarningCode:  "invalid_power_zone_ceilings",
+			wantWarningField: "power_zones_percent_of_ftp",
+		},
+		{
+			name:             "mismatched names",
+			ftp:              228,
+			ceilings:         []int{55, 75, 90},
+			names:            []string{"Z1", "Z2"},
+			wantWarningCode:  "mismatched_power_zone_names",
+			wantWarningField: "power_zone_names",
+		},
+		{
+			name:      "absent names",
+			ftp:       228,
+			ceilings:  []int{55, 75, 90},
+			wantWatts: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			response := newGetAthleteProfileResponse(intervals.AthleteWithSportSettings{
+				ID: "i12345",
+				SportSettings: []intervals.SportSettings{{
+					Types:                            []string{"Ride"},
+					FTP:                              tc.ftp,
+					PowerZoneUpperBoundsPercentOfFTP: tc.ceilings,
+					PowerZoneNames:                   tc.names,
+				}},
+			}, "test", "UTC")
+
+			encoded, err := json.Marshal(response)
+			if err != nil {
+				t.Fatalf("marshal profile response: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(encoded, &payload); err != nil {
+				t.Fatalf("decode profile response: %v", err)
+			}
+			sport := payload["sport_settings"].([]any)[0].(map[string]any)
+			wantPercentages := make([]any, len(tc.ceilings))
+			for i, ceiling := range tc.ceilings {
+				wantPercentages[i] = float64(ceiling)
+			}
+			if got := sport["power_zones_percent_of_ftp"]; !reflect.DeepEqual(got, wantPercentages) {
+				t.Fatalf("power_zones_percent_of_ftp = %#v, want %#v", got, wantPercentages)
+			}
+			_, hasWatts := sport["power_zones_watts"]
+			if hasWatts != tc.wantWatts {
+				t.Fatalf("power_zones_watts present = %t, want %t; sport = %#v", hasWatts, tc.wantWatts, sport)
+			}
+
+			warnings := profilePowerWarnings(response.Meta.Warnings)
+			if tc.wantWarningCode == "" {
+				if len(warnings) != 0 {
+					t.Fatalf("power readiness warnings = %#v, want none", warnings)
+				}
+				return
+			}
+			if len(warnings) != 1 || warnings[0].Code != tc.wantWarningCode || warnings[0].Field != tc.wantWarningField {
+				t.Fatalf("power readiness warnings = %#v, want code %q field %q", warnings, tc.wantWarningCode, tc.wantWarningField)
+			}
+		})
+	}
+}
+
 func TestGetAthleteProfileKeepsFTPAndZoneBoundariesSeparate(t *testing.T) {
 	t.Parallel()
 
 	response := newGetAthleteProfileResponse(intervals.AthleteWithSportSettings{
 		ID: "i12345",
 		SportSettings: []intervals.SportSettings{{
-			Types:          []string{"Ride"},
-			FTP:            250,
-			IndoorFTP:      235,
+			Types:                            []string{"Ride"},
+			FTP:                              250,
+			IndoorFTP:                        235,
 			PowerZoneUpperBoundsPercentOfFTP: []int{125, 188, 250, 300},
-			PowerZoneNames: []string{"Z1", "Z2", "Boundary matching FTP", "Z4"},
+			PowerZoneNames:                   []string{"Z1", "Z2", "Boundary matching FTP", "Z4"},
 		}},
 	}, "test", "UTC")
 
@@ -216,13 +343,16 @@ func TestGetAthleteProfileKeepsFTPAndZoneBoundariesSeparate(t *testing.T) {
 	if sport.FTPWatts != 250 || sport.IndoorFTPWatts != 235 {
 		t.Fatalf("FTP fields = ftp:%d indoor:%d, want separate threshold values", sport.FTPWatts, sport.IndoorFTPWatts)
 	}
-	if len(sport.PowerZonesWatts) != 4 || sport.PowerZonesWatts[2] != 250 {
-		t.Fatalf("power_zones_watts = %#v, want boundary array retaining 250", sport.PowerZonesWatts)
+	if len(sport.PowerZonesPercentOfFTP) != 4 || sport.PowerZonesPercentOfFTP[2] != 250 {
+		t.Fatalf("power_zones_percent_of_ftp = %#v, want upstream ceiling array retaining 250", sport.PowerZonesPercentOfFTP)
+	}
+	if len(sport.PowerZonesWatts) != 4 || sport.PowerZonesWatts[2] != 625 {
+		t.Fatalf("power_zones_watts = %#v, want FTP-derived boundary retaining 625", sport.PowerZonesWatts)
 	}
 	if sport.PowerZoneNames[2] != "Boundary matching FTP" {
 		t.Fatalf("power_zone_names = %#v, want zone-boundary name preserved separately", sport.PowerZoneNames)
 	}
-	if !strings.Contains(response.Meta.PowerThresholdConvention, "ftp_watts is the upstream sport FTP threshold") || !strings.Contains(response.Meta.ZoneBoundaryConvention, "power_zones_watts and hr_zones_bpm are upstream zone boundary arrays") {
+	if !strings.Contains(response.Meta.PowerThresholdConvention, "ftp_watts is the upstream sport FTP threshold") || !strings.Contains(response.Meta.ZoneBoundaryConvention, "upper ceilings") {
 		t.Fatalf("profile semantic metadata = %#v / %#v", response.Meta.PowerThresholdConvention, response.Meta.ZoneBoundaryConvention)
 	}
 }
@@ -233,10 +363,10 @@ func TestGetAthleteProfileDoesNotTreatZoneBoundaryAsIndoorFTP(t *testing.T) {
 	response := newGetAthleteProfileResponse(intervals.AthleteWithSportSettings{
 		ID: "i12345",
 		SportSettings: []intervals.SportSettings{{
-			Types:          []string{"Ride"},
-			FTP:            260,
+			Types:                            []string{"Ride"},
+			FTP:                              260,
 			PowerZoneUpperBoundsPercentOfFTP: []int{130, 180, 240, 300},
-			PowerZoneNames: []string{"Z1", "Z2", "Looks like indoor FTP", "Z4"},
+			PowerZoneNames:                   []string{"Z1", "Z2", "Looks like indoor FTP", "Z4"},
 		}},
 	}, "test", "UTC")
 
@@ -255,9 +385,10 @@ func TestGetAthleteProfileDoesNotTreatZoneBoundaryAsIndoorFTP(t *testing.T) {
 	if _, ok := sport["indoor_ftp_watts"]; ok {
 		t.Fatalf("sport row = %#v, did not expect absent upstream indoor_ftp to be synthesized", sport)
 	}
+	percentages := sport["power_zones_percent_of_ftp"].([]any)
 	zones := sport["power_zones_watts"].([]any)
-	if zones[2] != float64(240) || sport["power_zone_names"].([]any)[2] != "Looks like indoor FTP" {
-		t.Fatalf("zone fields = %#v / %#v, want numeric boundary kept as zone data", zones, sport["power_zone_names"])
+	if percentages[2] != float64(240) || zones[2] != float64(624) || sport["power_zone_names"].([]any)[2] != "Looks like indoor FTP" {
+		t.Fatalf("zone fields = %#v / %#v / %#v, want percent ceiling and FTP-derived watts kept as zone data", percentages, zones, sport["power_zone_names"])
 	}
 	if !strings.Contains(response.Meta.PowerThresholdConvention, "Absence of indoor_ftp_watts means Icuvisor has no separate indoor FTP") || !strings.Contains(response.Meta.PowerThresholdConvention, "not that it should be inferred from zones") {
 		t.Fatalf("power threshold convention = %q, want absent-indoor-FTP limitation", response.Meta.PowerThresholdConvention)
@@ -811,6 +942,16 @@ func profileWarningCodes(warnings []athleteprofile.ReadinessWarning) []string {
 		codes = append(codes, warning.Code)
 	}
 	return codes
+}
+
+func profilePowerWarnings(warnings []athleteprofile.ReadinessWarning) []athleteprofile.ReadinessWarning {
+	filtered := make([]athleteprofile.ReadinessWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		if strings.Contains(warning.Code, "power") {
+			filtered = append(filtered, warning)
+		}
+	}
+	return filtered
 }
 
 func stringSlicesEqual(got []string, want []string) bool {
