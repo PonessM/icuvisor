@@ -14,7 +14,8 @@ jobs:
   publish:
     name: Submit manifests to winget-pkgs
     runs-on: windows-latest
-    # Manual recovery only. The primary release workflow submits Winget after publishing the GitHub Release.
+    # Manual recovery only. The primary release workflow intentionally skips
+    # Winget until the fork token can execute UpdateRef.
     steps:
       - name: Guard on WINGET_PAT secret
         id: guard

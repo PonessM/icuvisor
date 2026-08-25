@@ -428,11 +428,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$RELEASE_TAG" --draft=false
 
+  # Disabled until the Winget fork token can execute UpdateRef. Keep the
+  # standalone winget.yml workflow available for manual recovery.
   publish-winget:
     name: Submit manifests to winget-pkgs
     runs-on: windows-latest
     needs: finalize
-    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+    if: ${{ false }}
     steps:
       - name: Guard on WINGET_PAT secret
         id: guard

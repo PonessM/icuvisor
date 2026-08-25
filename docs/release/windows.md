@@ -21,7 +21,7 @@ finalize (ubuntu)            <- regenerates SHA256SUMS, publishes draft
 [release: published]
    |
    v
-winget.yml                   <- submits PR to microsoft/winget-pkgs (skipped without WINGET_PAT)
+winget.yml                   <- manual recovery only while primary submission is disabled
 ```
 
 Artifacts produced per release (added to the existing macOS/Linux set):
@@ -29,7 +29,7 @@ Artifacts produced per release (added to the existing macOS/Linux set):
 - `icuvisor_<version>_windows_amd64.msi` — unsigned by default; Authenticode-signed only when signing secrets are configured
 - `icuvisor_<version>_windows_arm64.msi` — unsigned by default; Authenticode-signed only when signing secrets are configured
 - Scoop manifest committed to `ricardocabral/scoop-icuvisor` at `bucket/icuvisor.json` (skipped without `SCOOP_BUCKET_PAT`)
-- Winget PR opened against `microsoft/winget-pkgs` under `RicardoCabral.icuvisor` (skipped without `WINGET_PAT`)
+- Winget PR opened against `microsoft/winget-pkgs` under `RicardoCabral.icuvisor` when the manual recovery workflow is run
 
 ## 1. GitHub Actions secrets
 
@@ -149,15 +149,15 @@ You generally only need to monitor the PR:
 - If a moderator asks about the unsigned MSI, reply that unsigned MSI/EXE installers are accepted in `winget-pkgs`; the manifest pins immutable GitHub release asset URLs and SHA-256 hashes.
 - Once merged, users can install with `winget install --id RicardoCabral.icuvisor --exact`.
 
-### 3.3 Automate future Winget versions
+### 3.3 Re-enable primary Winget submission
 
-After the first Winget PR is merged:
+The primary release workflow currently skips Winget because the fork token cannot execute `UpdateRef`. After that permission issue is fixed:
 
 - [ ] Create a classic PAT with `public_repo` scope for the account that will open Winget PRs.
 - [ ] Make sure that account can fork `microsoft/winget-pkgs` (pre-create the fork if needed).
 - [ ] Add `WINGET_PAT` to this repository's Actions secrets.
-- [ ] Publish a stable release such as `v1.0.1`; prereleases are intentionally skipped.
-- [ ] Confirm `.github/workflows/winget.yml` opens an update PR.
+- [ ] Run `.github/workflows/winget.yml` manually for a published stable release and confirm it opens an update PR.
+- [ ] Remove the disabling condition from `.github/workflows/release.yml` and confirm the primary job succeeds on the next stable release.
 
 The workflow strips the leading `v` from tags before passing `PackageVersion`, so `v1.0.1` becomes Winget version `1.0.1`.
 
@@ -183,7 +183,7 @@ The `wix build` invocation passes the binary, license, and icon paths in via WiX
   - uninstall via Apps & Features,
   - confirm clean removal.
 - [ ] Promote to a stable tag, such as `v1.0.1`.
-- [ ] Confirm `.github/workflows/winget.yml` opens or updates the Winget PR for the stable release.
+- [ ] Run `.github/workflows/winget.yml` manually and confirm it opens or updates the Winget PR for the stable release.
 - [ ] After the Winget PR is merged, smoke test on a Windows VM: `winget install --id RicardoCabral.icuvisor --exact`, open a new shell, and run `icuvisor version`.
 
 Windows SmartScreen may warn "Unknown publisher" on unsigned builds. That is expected and does not prevent Winget submission.
@@ -198,7 +198,7 @@ The current CI signing hook is Azure Trusted Signing. If Azure Trusted Signing i
 
 - **Winget first submission fails in `winget-releaser`**: the package probably is not present in `microsoft/winget-pkgs` yet. Bootstrap the first version with `wingetcreate` or Komac, wait for it to merge, then retry automation on the next release.
 - **Komac cannot find `ricardocabral/winget-pkgs`**: fork `microsoft/winget-pkgs` under the token user's account, then retry the submission.
-- **Winget PR never opens**: `WINGET_PAT` is missing `public_repo`, the token user cannot fork `microsoft/winget-pkgs`, or the action is rate-limited. Re-run `winget.yml` via `workflow_dispatch` with the tag.
+- **Winget PR never opens**: `WINGET_PAT` is missing `public_repo`, the token user cannot fork `microsoft/winget-pkgs`, or the action is rate-limited. Re-run `winget.yml` via `workflow_dispatch` with the tag after correcting the permission issue.
 - **Winget moderation flags unsigned installer**: note that unsigned MSI/EXE installers are allowed, then wait for static analysis/reputation if requested. If moderation asks for another fix, update the manifest or release asset as directed.
 - **`wix build` fails with version error**: the tag included pre-release metadata that survived the strip step. Inspect the `Compute MSI version` step output.
 - **Scoop manifest never appears in bucket repo**: `SCOOP_BUCKET_PAT` is missing `contents: write` on `scoop-icuvisor`, or expired. Regenerate.
