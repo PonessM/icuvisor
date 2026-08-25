@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Structured workout steps now accept `press_lap: true`, which serializes the documented Intervals.icu `Press lap` marker while retaining a required duration or distance for planned load estimates. The workout-syntax resource documents Garmin-focused device support and fidelity warnings remain explicit when the returned workout document omits the control.
+- `get_extended_metrics` now returns eight running-dynamics metrics at activity and interval scope when present: stance time, vertical oscillation and ratio, step length, stance-time percent and balance, vertical speed, and leg-spring stiffness. Responses preserve explicit units and source provenance, omit absent/null/malformed values, and retain zero values. `average_impact_loading_rate` remains raw-only because its unit is not documented.
 
 ### Changed
 

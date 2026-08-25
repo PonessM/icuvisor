@@ -111,6 +111,52 @@ func TestRepeatTrailingCooldownStaysOutsideRepeat(t *testing.T) {
 	}
 }
 
+func TestRepeatedRunningPaceBlockPreservesNestedLabelsDistancesAndAbsolutePace(t *testing.T) {
+	const dsl = "Intervals 5x\n  - Sprint 400mtr 3:45/km Pace\n  - Rest 200mtr 5:30/km Pace"
+
+	doc, err := Parse(dsl)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(doc.Steps) != 1 {
+		t.Fatalf("top-level steps = %d, want one repeat block", len(doc.Steps))
+	}
+	repeat := doc.Steps[0]
+	if repeat.Description != "Intervals" || repeat.Reps != 5 || len(repeat.Steps) != 2 {
+		t.Fatalf("repeat block = %#v, want 5x Intervals with Sprint and Rest children", repeat)
+	}
+	for _, tc := range []struct {
+		name     string
+		step     Step
+		label    string
+		distance float64
+		pace     float64
+	}{
+		{name: "sprint", step: repeat.Steps[0], label: "Sprint", distance: 400, pace: 225},
+		{name: "rest", step: repeat.Steps[1], label: "Rest", distance: 200, pace: 330},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.step.Description != tc.label {
+				t.Fatalf("step label = %q, want %q before distance and pace target", tc.step.Description, tc.label)
+			}
+			if tc.step.Distance == nil || tc.step.Distance.Value != tc.distance || tc.step.Distance.Unit != "mtr" {
+				t.Fatalf("distance = %#v, want %gmtr", tc.step.Distance, tc.distance)
+			}
+			if tc.step.Pace == nil || tc.step.Pace.Value == nil || *tc.step.Pace.Value != tc.pace || tc.step.Pace.Units != "MINS_KM" {
+				t.Fatalf("pace = %#v, want %g seconds/km in MINS_KM", tc.step.Pace, tc.pace)
+			}
+		})
+	}
+
+	got, err := Serialize(doc)
+	if err != nil {
+		t.Fatalf("Serialize(Parse(dsl)) error = %v", err)
+	}
+	if got != dsl {
+		t.Fatalf("Serialize(Parse(dsl)) = %q, want %q", got, dsl)
+	}
+}
+
 func TestSerializeRepeatHeadersAreCanonical(t *testing.T) {
 	t.Parallel()
 

@@ -7,7 +7,16 @@
       "label": "Cadence data",
       "average_cadence": 176,
       "min_cadence": 164,
-      "max_cadence": 188
+      "max_cadence": 188,
+      "average_stance_time": 246,
+      "average_vertical_oscillation": 79,
+      "average_vertical_ratio": 7.1,
+      "average_step_length": 1210,
+      "average_stance_time_percent": 40.4,
+      "average_stance_time_balance": 49.8,
+      "average_vertical_speed": 1.19,
+      "average_leg_spring_stiffness": 11.2,
+      "average_impact_loading_rate": 6.1
     }
   ]
 }

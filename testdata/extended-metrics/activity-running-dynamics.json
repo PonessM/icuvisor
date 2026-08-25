@@ -1,5 +1,14 @@
 {
   "id": "activity-running-dynamics-fixture",
   "type": "Run",
-  "average_cadence": 176
+  "average_cadence": 176,
+  "average_stance_time": 0,
+  "average_vertical_oscillation": 82,
+  "average_vertical_ratio": 7.4,
+  "average_step_length": 1180,
+  "average_stance_time_percent": 41.2,
+  "average_stance_time_balance": 50.1,
+  "average_vertical_speed": 1.21,
+  "average_leg_spring_stiffness": 10.5,
+  "average_impact_loading_rate": 6.3
 }

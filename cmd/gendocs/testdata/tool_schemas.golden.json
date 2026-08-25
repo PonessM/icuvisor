@@ -2302,7 +2302,7 @@
   },
   "get_extended_metrics": {
     "name": "get_extended_metrics",
-    "description": "Get one activity's upstream-exposed extended metrics by activity_id.",
+    "description": "Get one activity's upstream-exposed extended metrics by activity_id, including documented running dynamics when present.",
     "arguments": [
       {
         "name": "activity_id",

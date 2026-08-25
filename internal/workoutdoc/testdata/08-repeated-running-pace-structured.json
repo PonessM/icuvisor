@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "description": "Intervals",
+      "reps": 5,
+      "steps": [
+        {
+          "description": "Sprint",
+          "distance": { "value": 400, "unit": "mtr" },
+          "pace": { "value": 225, "units": "MINS_KM" }
+        },
+        {
+          "description": "Rest",
+          "distance": { "value": 200, "unit": "mtr" },
+          "pace": { "value": 330, "units": "MINS_KM" }
+        }
+      ]
+    }
+  ]
+}

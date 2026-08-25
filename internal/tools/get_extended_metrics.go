@@ -12,12 +12,12 @@ import (
 
 const (
 	getExtendedMetricsName                 = "get_extended_metrics"
-	getExtendedMetricsDescription          = "Get one activity's upstream-exposed extended metrics by activity_id. Terse mode drops unavailable fields and never computes or zero-fills missing metrics; interval DFA alpha1 is surfaced only from the upstream average_dfa_a1 key as unitless, conditional interval evidence and is never relabeled as activity-level AlphaHRV; _meta.metric_provenance and _meta.data_availability preserve source and insufficient-data status. include_full returns raw upstream payloads."
+	getExtendedMetricsDescription          = "Get one activity's upstream-exposed extended metrics by activity_id, including documented running dynamics when present. Terse mode drops unavailable fields and never computes or zero-fills missing metrics; interval DFA alpha1 is surfaced only from the upstream average_dfa_a1 key as unitless, conditional interval evidence and is never relabeled as activity-level AlphaHRV; _meta.metric_provenance and _meta.data_availability preserve source and insufficient-data status. include_full returns raw upstream payloads."
 	invalidExtendedMetricsArgumentsMessage = "invalid get_extended_metrics arguments; provide activity_id and optional include_full"
 	fetchExtendedMetricsMessage            = "could not fetch extended metrics; check activity_id and intervals.icu credentials"
 )
 
-var droppedExtendedMetricFields = []string{"ground_contact_time_ms", "vertical_oscillation_cm", "ground_contact_time_balance_percent", "core_temperature_c", "hr_drift_percent", "cadence_by_zone"}
+var droppedExtendedMetricFields = []string{"ground_contact_time_ms", "vertical_oscillation_cm", "ground_contact_time_balance_percent", "core_temperature_c", "hr_drift_percent", "cadence_by_zone", "average_impact_loading_rate"}
 
 // ExtendedMetricsClient retrieves activity sources used by get_extended_metrics.
 type ExtendedMetricsClient interface {
@@ -42,6 +42,14 @@ type extendedMetricsResponse struct {
 }
 
 type extendedActivityMetrics struct {
+	AverageStanceTime            *float64  `json:"average_stance_time,omitempty"`
+	AverageVerticalOscillation   *float64  `json:"average_vertical_oscillation,omitempty"`
+	AverageVerticalRatio         *float64  `json:"average_vertical_ratio,omitempty"`
+	AverageStepLength            *float64  `json:"average_step_length,omitempty"`
+	AverageStanceTimePercent     *float64  `json:"average_stance_time_percent,omitempty"`
+	AverageStanceTimeBalance     *float64  `json:"average_stance_time_balance,omitempty"`
+	AverageVerticalSpeed         *float64  `json:"average_vertical_speed,omitempty"`
+	AverageLegSpringStiffness    *float64  `json:"average_leg_spring_stiffness,omitempty"`
 	StrideLengthM                *float64  `json:"stride_length_m,omitempty"`
 	CardiacDecouplingPercent     *float64  `json:"cardiac_decoupling_percent,omitempty"`
 	PWHR                         *float64  `json:"pw_hr,omitempty"`
@@ -70,17 +78,25 @@ type extendedActivityMetrics struct {
 }
 
 type extendedIntervalMetrics struct {
-	IntervalID               string   `json:"interval_id,omitempty"`
-	Label                    string   `json:"label,omitempty"`
-	DFAAlpha1                *float64 `json:"dfa_alpha1,omitempty"`
-	WPrimeBalanceStartKJ     *float64 `json:"w_prime_balance_start_kj,omitempty"`
-	WPrimeBalanceEndKJ       *float64 `json:"w_prime_balance_end_kj,omitempty"`
-	JoulesAboveFTPKJ         *float64 `json:"joules_above_ftp_kj,omitempty"`
-	AerobicDecouplingPercent *float64 `json:"aerobic_decoupling_percent,omitempty"`
-	LeftRightBalancePercent  *float64 `json:"left_right_balance_percent,omitempty"`
-	StrideLengthM            *float64 `json:"stride_length_m,omitempty"`
-	StrainScore              *float64 `json:"strain_score,omitempty"`
-	TrainingLoad             *float64 `json:"training_load,omitempty"`
+	AverageStanceTime          *float64 `json:"average_stance_time,omitempty"`
+	AverageVerticalOscillation *float64 `json:"average_vertical_oscillation,omitempty"`
+	AverageVerticalRatio       *float64 `json:"average_vertical_ratio,omitempty"`
+	AverageStepLength          *float64 `json:"average_step_length,omitempty"`
+	AverageStanceTimePercent   *float64 `json:"average_stance_time_percent,omitempty"`
+	AverageStanceTimeBalance   *float64 `json:"average_stance_time_balance,omitempty"`
+	AverageVerticalSpeed       *float64 `json:"average_vertical_speed,omitempty"`
+	AverageLegSpringStiffness  *float64 `json:"average_leg_spring_stiffness,omitempty"`
+	IntervalID                 string   `json:"interval_id,omitempty"`
+	Label                      string   `json:"label,omitempty"`
+	DFAAlpha1                  *float64 `json:"dfa_alpha1,omitempty"`
+	WPrimeBalanceStartKJ       *float64 `json:"w_prime_balance_start_kj,omitempty"`
+	WPrimeBalanceEndKJ         *float64 `json:"w_prime_balance_end_kj,omitempty"`
+	JoulesAboveFTPKJ           *float64 `json:"joules_above_ftp_kj,omitempty"`
+	AerobicDecouplingPercent   *float64 `json:"aerobic_decoupling_percent,omitempty"`
+	LeftRightBalancePercent    *float64 `json:"left_right_balance_percent,omitempty"`
+	StrideLengthM              *float64 `json:"stride_length_m,omitempty"`
+	StrainScore                *float64 `json:"strain_score,omitempty"`
+	TrainingLoad               *float64 `json:"training_load,omitempty"`
 }
 
 type extendedMetricProvenance struct {
@@ -106,7 +122,7 @@ type extendedMetricsMeta struct {
 
 func newGetExtendedMetricsTool(client ExtendedMetricsClient, profileClient ProfileClient, version string, timezoneFallback string, debugMetadata bool, shaping ...responseShaping) Tool {
 	shapeCfg := responseShapingOrDefault(shaping)
-	return fullTool(Tool{Name: getExtendedMetricsName, Description: getExtendedMetricsDescription, InputSchema: extendedMetricsInputSchema(), OutputSchema: genericOutputSchema("Upstream-exposed extended metrics for one activity. Interval dfa_alpha1 is source-labelled from average_dfa_a1 with unitless, conditional, interval-only provenance; missing, null, or malformed values remain omitted and are recorded in _meta.data_availability."), Handler: getExtendedMetricsHandler(client, profileClient, version, timezoneFallback, debugMetadata, shapeCfg)})
+	return fullTool(Tool{Name: getExtendedMetricsName, Description: getExtendedMetricsDescription, InputSchema: extendedMetricsInputSchema(), OutputSchema: genericOutputSchema("Upstream-exposed extended metrics for one activity, including documented running dynamics when present. Interval dfa_alpha1 is source-labelled from average_dfa_a1 with unitless, conditional, interval-only provenance; missing, null, or malformed values remain omitted and are recorded in _meta.data_availability."), Handler: getExtendedMetricsHandler(client, profileClient, version, timezoneFallback, debugMetadata, shapeCfg)})
 }
 
 func getExtendedMetricsHandler(client ExtendedMetricsClient, profileClient ProfileClient, version string, timezoneFallback string, debugMetadata bool, shapeCfg responseShaping) Handler {
@@ -238,6 +254,14 @@ func shapeExtendedMetrics(activityID string, activity intervals.Activity, dto in
 
 func extendedMetricsFromActivity(raw map[string]any, powerVsHR intervals.PowerVsHR, powerVsHROK bool) extendedActivityMetrics {
 	var out extendedActivityMetrics
+	out.AverageStanceTime = rawNumberPtr(raw, "average_stance_time")
+	out.AverageVerticalOscillation = rawNumberPtr(raw, "average_vertical_oscillation")
+	out.AverageVerticalRatio = rawNumberPtr(raw, "average_vertical_ratio")
+	out.AverageStepLength = rawNumberPtr(raw, "average_step_length")
+	out.AverageStanceTimePercent = rawNumberPtr(raw, "average_stance_time_percent")
+	out.AverageStanceTimeBalance = rawNumberPtr(raw, "average_stance_time_balance")
+	out.AverageVerticalSpeed = rawNumberPtr(raw, "average_vertical_speed")
+	out.AverageLegSpringStiffness = rawNumberPtr(raw, "average_leg_spring_stiffness")
 	out.StrideLengthM = rawNumberPtr(raw, "average_stride")
 	out.PWHR = firstNumberPtr(rawNumberPtr(raw, "icu_power_hr"), powerVsHR.PowerHR)
 	out.CardiacDecouplingPercent = firstNumberPtr(rawNumberPtr(raw, "decoupling"), powerVsHR.Decoupling)
@@ -274,7 +298,7 @@ func extendedMetricsFromActivity(raw map[string]any, powerVsHR intervals.PowerVs
 }
 
 func extendedMetricProvenanceMap() map[string]extendedMetricProvenance {
-	return map[string]extendedMetricProvenance{
+	provenance := map[string]extendedMetricProvenance{
 		"dfa_alpha1": {
 			SourceField:    "average_dfa_a1",
 			ResponseField:  "dfa_alpha1",
@@ -284,6 +308,34 @@ func extendedMetricProvenanceMap() map[string]extendedMetricProvenance {
 			Availability:   "conditional",
 		},
 	}
+	for _, metric := range documentedRunningDynamicsProvenance {
+		provenance[metric.ResponseField] = extendedMetricProvenance{
+			SourceField:    metric.SourceField,
+			ResponseField:  metric.ResponseField,
+			Scope:          "activity_and_interval",
+			Unit:           metric.Unit,
+			SourceEndpoint: "GET /api/v1/activity/{id}; GET /api/v1/activity/{id}/intervals",
+			Availability:   "conditional",
+		}
+	}
+	return provenance
+}
+
+type runningDynamicsProvenance struct {
+	ResponseField string
+	SourceField   string
+	Unit          string
+}
+
+var documentedRunningDynamicsProvenance = []runningDynamicsProvenance{
+	{ResponseField: "average_stance_time", SourceField: "average_stance_time", Unit: "ms"},
+	{ResponseField: "average_vertical_oscillation", SourceField: "average_vertical_oscillation", Unit: "mm"},
+	{ResponseField: "average_vertical_ratio", SourceField: "average_vertical_ratio", Unit: string(units.UnitPercent)},
+	{ResponseField: "average_step_length", SourceField: "average_step_length", Unit: "mm"},
+	{ResponseField: "average_stance_time_percent", SourceField: "average_stance_time_percent", Unit: string(units.UnitPercent)},
+	{ResponseField: "average_stance_time_balance", SourceField: "average_stance_time_balance", Unit: string(units.UnitPercent)},
+	{ResponseField: "average_vertical_speed", SourceField: "average_vertical_speed", Unit: "m/s"},
+	{ResponseField: "average_leg_spring_stiffness", SourceField: "average_leg_spring_stiffness", Unit: "kN/m"},
 }
 
 func dfaUnavailableWithoutIntervalsDiagnostic(activityID string) dataAvailabilityDiagnostic {
@@ -348,6 +400,14 @@ func extendedIntervals(rows []intervals.ActivityInterval, activityID string) ([]
 		if metric.Label == "" {
 			metric.Label = rawString(row.Raw, "name")
 		}
+		metric.AverageStanceTime = rawNumberPtr(row.Raw, "average_stance_time")
+		metric.AverageVerticalOscillation = rawNumberPtr(row.Raw, "average_vertical_oscillation")
+		metric.AverageVerticalRatio = rawNumberPtr(row.Raw, "average_vertical_ratio")
+		metric.AverageStepLength = rawNumberPtr(row.Raw, "average_step_length")
+		metric.AverageStanceTimePercent = rawNumberPtr(row.Raw, "average_stance_time_percent")
+		metric.AverageStanceTimeBalance = rawNumberPtr(row.Raw, "average_stance_time_balance")
+		metric.AverageVerticalSpeed = rawNumberPtr(row.Raw, "average_vertical_speed")
+		metric.AverageLegSpringStiffness = rawNumberPtr(row.Raw, "average_leg_spring_stiffness")
 		metric.DFAAlpha1 = rawNumberPtr(row.Raw, "average_dfa_a1")
 		if diagnostic := dfaIntervalAvailabilityDiagnostic(activityID, metric.IntervalID, row.Raw); diagnostic != nil {
 			diagnostics = append(diagnostics, *diagnostic)
@@ -368,7 +428,7 @@ func extendedIntervals(rows []intervals.ActivityInterval, activityID string) ([]
 }
 
 func hasExtendedIntervalMetric(row extendedIntervalMetrics) bool {
-	return row.DFAAlpha1 != nil || row.WPrimeBalanceStartKJ != nil || row.WPrimeBalanceEndKJ != nil || row.JoulesAboveFTPKJ != nil || row.AerobicDecouplingPercent != nil || row.LeftRightBalancePercent != nil || row.StrideLengthM != nil || row.StrainScore != nil || row.TrainingLoad != nil
+	return row.AverageStanceTime != nil || row.AverageVerticalOscillation != nil || row.AverageVerticalRatio != nil || row.AverageStepLength != nil || row.AverageStanceTimePercent != nil || row.AverageStanceTimeBalance != nil || row.AverageVerticalSpeed != nil || row.AverageLegSpringStiffness != nil || row.DFAAlpha1 != nil || row.WPrimeBalanceStartKJ != nil || row.WPrimeBalanceEndKJ != nil || row.JoulesAboveFTPKJ != nil || row.AerobicDecouplingPercent != nil || row.LeftRightBalancePercent != nil || row.StrideLengthM != nil || row.StrainScore != nil || row.TrainingLoad != nil
 }
 
 func rawNumberPtr(raw map[string]any, key string) *float64 {
@@ -471,7 +531,7 @@ func firstNumberPtr(values ...*float64) *float64 {
 }
 
 func extendedMetricUnits() map[string]string {
-	return map[string]string{
+	metricUnits := map[string]string{
 		"dfa_alpha1":                      "unitless",
 		"stride_length_m":                 string(units.UnitM),
 		"cardiac_decoupling_percent":      string(units.UnitPercent),
@@ -487,6 +547,10 @@ func extendedMetricUnits() map[string]string {
 		"left_right_balance_percent":      string(units.UnitPercent),
 		"rpe":                             string(units.UnitRPE),
 	}
+	for _, metric := range documentedRunningDynamicsProvenance {
+		metricUnits[metric.ResponseField] = metric.Unit
+	}
+	return metricUnits
 }
 
 func extendedMetricsInputSchema() map[string]any {

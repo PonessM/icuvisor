@@ -84,7 +84,7 @@
     "group": "activities",
     "tier": "full",
     "safety": "read",
-    "summary": "Get one activity's upstream-exposed extended metrics by activity_id.",
+    "summary": "Get one activity's upstream-exposed extended metrics by activity_id, including documented running dynamics when present.",
     "anchor": "get_extended_metrics"
   },
   {

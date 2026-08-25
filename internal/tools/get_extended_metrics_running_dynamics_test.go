@@ -13,6 +13,137 @@ const (
 	runningDynamicsIntervalsFixture = "../../testdata/extended-metrics/activity-intervals-running-dynamics.json"
 )
 
+var documentedRunningDynamics = []struct {
+	responseField string
+	sourceField   string
+	unit          string
+	activityValue float64
+	intervalValue float64
+}{
+	{responseField: "average_stance_time", sourceField: "average_stance_time", unit: "ms", activityValue: 0, intervalValue: 246},
+	{responseField: "average_vertical_oscillation", sourceField: "average_vertical_oscillation", unit: "mm", activityValue: 82, intervalValue: 79},
+	{responseField: "average_vertical_ratio", sourceField: "average_vertical_ratio", unit: "PERCENT", activityValue: 7.4, intervalValue: 7.1},
+	{responseField: "average_step_length", sourceField: "average_step_length", unit: "mm", activityValue: 1180, intervalValue: 1210},
+	{responseField: "average_stance_time_percent", sourceField: "average_stance_time_percent", unit: "PERCENT", activityValue: 41.2, intervalValue: 40.4},
+	{responseField: "average_stance_time_balance", sourceField: "average_stance_time_balance", unit: "PERCENT", activityValue: 50.1, intervalValue: 49.8},
+	{responseField: "average_vertical_speed", sourceField: "average_vertical_speed", unit: "m/s", activityValue: 1.21, intervalValue: 1.19},
+	{responseField: "average_leg_spring_stiffness", sourceField: "average_leg_spring_stiffness", unit: "kN/m", activityValue: 10.5, intervalValue: 11.2},
+}
+
+func TestExtendedMetricsReturnsDocumentedRunningDynamicsAtActivityAndIntervalScope(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeExtendedMetricsClient(t)
+	client.activity = decodeActivityFileFixture(t, runningDynamicsActivityFixture)
+	client.intervals = decodeIntervalsFileFixture(t, runningDynamicsIntervalsFixture)
+	tool := newGetExtendedMetricsTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-running-dynamics-fixture"}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	payload := resultMap(t, result)
+	metrics := payload["metrics"].(map[string]any)
+	intervalsOut, ok := payload["intervals"].([]any)
+	if !ok || len(intervalsOut) != 1 {
+		t.Fatalf("terse response intervals = %#v, want one running-dynamics interval", payload["intervals"])
+	}
+	interval := intervalsOut[0].(map[string]any)
+	meta := payload["_meta"].(map[string]any)
+	units := meta["extended_metric_units"].(map[string]any)
+	provenance := meta["metric_provenance"].(map[string]any)
+
+	for _, tc := range documentedRunningDynamics {
+		if got := metrics[tc.responseField]; got != tc.activityValue {
+			t.Fatalf("activity metrics[%s] = %v, want %v in %#v", tc.responseField, got, tc.activityValue, metrics)
+		}
+		if got := interval[tc.responseField]; got != tc.intervalValue {
+			t.Fatalf("interval[%s] = %v, want %v in %#v", tc.responseField, got, tc.intervalValue, interval)
+		}
+		if got := units[tc.responseField]; got != tc.unit {
+			t.Fatalf("extended_metric_units[%s] = %v, want %q", tc.responseField, got, tc.unit)
+		}
+		entry := provenance[tc.responseField].(map[string]any)
+		if entry["source_field"] != tc.sourceField || entry["response_field"] != tc.responseField || entry["unit"] != tc.unit || entry["scope"] != "activity_and_interval" || entry["source_endpoint"] != "GET /api/v1/activity/{id}; GET /api/v1/activity/{id}/intervals" || entry["availability"] != "conditional" {
+			t.Fatalf("metric_provenance[%s] = %#v", tc.responseField, entry)
+		}
+	}
+	for _, metricsScope := range []map[string]any{metrics, interval} {
+		if _, ok := metricsScope["average_impact_loading_rate"]; ok {
+			t.Fatalf("unit-unverified impact loading rate was surfaced: %#v", metricsScope)
+		}
+	}
+	if _, ok := units["average_impact_loading_rate"]; ok {
+		t.Fatalf("extended_metric_units included unit-unverified impact loading rate: %#v", units)
+	}
+	if _, ok := provenance["average_impact_loading_rate"]; ok {
+		t.Fatalf("metric_provenance included unit-unverified impact loading rate: %#v", provenance)
+	}
+	if !containsAnyString(meta["dropped_fields"].([]any), "average_impact_loading_rate") {
+		t.Fatalf("dropped_fields did not identify unit-unverified impact loading rate: %#v", meta["dropped_fields"])
+	}
+}
+
+func TestExtendedMetricsOmitsUnavailableDocumentedRunningDynamicsButKeepsThemRawWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeExtendedMetricsClient(t)
+	client.activity = decodeActivityFileFixture(t, runningDynamicsActivityFixture)
+	client.intervals = decodeIntervalsFileFixture(t, runningDynamicsIntervalsFixture)
+	setDocumentedRunningDynamicsUnavailable(t, &client.activity.Raw, &client.intervals)
+	tool := newGetExtendedMetricsTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-running-dynamics-fixture","include_full":true}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	payload := resultMap(t, result)
+	metrics := payload["metrics"].(map[string]any)
+	for _, tc := range documentedRunningDynamics {
+		if _, ok := metrics[tc.responseField]; ok {
+			t.Fatalf("activity metrics included unavailable %s: %#v", tc.responseField, metrics)
+		}
+	}
+	if intervalsOut, ok := payload["intervals"].([]any); ok {
+		for _, row := range intervalsOut {
+			interval := row.(map[string]any)
+			for _, tc := range documentedRunningDynamics {
+				if _, ok := interval[tc.responseField]; ok {
+					t.Fatalf("interval metrics included unavailable %s: %#v", tc.responseField, interval)
+				}
+			}
+		}
+	}
+	full := payload["full"].(map[string]any)
+	activityRaw := full["activity"].(map[string]any)
+	intervalRaw := full["intervals"].(map[string]any)["icu_intervals"].([]any)[0].(map[string]any)
+	if activityRaw["average_stance_time"] != nil || intervalRaw["average_stance_time"] != "malformed" {
+		t.Fatalf("full raw running dynamics = activity %#v interval %#v", activityRaw, intervalRaw)
+	}
+}
+
+func setDocumentedRunningDynamicsUnavailable(t *testing.T, activity *map[string]any, dto *intervals.IntervalsDTO) {
+	t.Helper()
+	intervalsRaw := dto.Raw["icu_intervals"].([]any)
+	intervalRaw := intervalsRaw[0].(map[string]any)
+	for index, tc := range documentedRunningDynamics {
+		switch index % 3 {
+		case 0:
+			(*activity)[tc.sourceField] = nil
+			intervalRaw[tc.sourceField] = "malformed"
+			dto.ICUIntervals[0].Raw[tc.sourceField] = "malformed"
+		case 1:
+			delete(*activity, tc.sourceField)
+			delete(intervalRaw, tc.sourceField)
+			delete(dto.ICUIntervals[0].Raw, tc.sourceField)
+		case 2:
+			(*activity)[tc.sourceField] = "malformed"
+			intervalRaw[tc.sourceField] = nil
+			dto.ICUIntervals[0].Raw[tc.sourceField] = nil
+		}
+	}
+}
+
 func TestExtendedMetricsDefersUnitUnverifiedRunningCadence(t *testing.T) {
 	t.Parallel()
 
@@ -75,6 +206,11 @@ func setRunningCadenceFixtureMode(t *testing.T, activity *map[string]any, dto *i
 	applyCadenceMode(*activity, []string{"average_cadence"}, mode)
 	applyCadenceMode(intervalRaw, runningCadenceKeys, mode)
 	applyCadenceMode(dto.ICUIntervals[0].Raw, runningCadenceKeys, mode)
+	for _, metric := range documentedRunningDynamics {
+		delete(*activity, metric.sourceField)
+		delete(intervalRaw, metric.sourceField)
+		delete(dto.ICUIntervals[0].Raw, metric.sourceField)
+	}
 }
 
 var runningCadenceKeys = []string{"average_cadence", "min_cadence", "max_cadence"}
