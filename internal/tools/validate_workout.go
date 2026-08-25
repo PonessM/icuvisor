@@ -221,7 +221,7 @@ func validateWorkoutInputSchema() map[string]any {
 			},
 			"workout_doc": map[string]any{
 				"type":        "object",
-				"description": "Optional structured WorkoutDoc with a steps[] array. Validated via the same Serialize path that write tools use. In each structured step, description is a label/comment only: do not include duration or distance tokens there; use duration seconds or distance instead. Mutually compatible with description; when both contain structured steps, workout_doc wins and the response surfaces a STEP_SOURCES_OVERRIDDEN warning.",
+				"description": "Optional structured WorkoutDoc with a steps[] array. Validated via the same Serialize path that write tools use. In each structured step, description is a label/comment only: do not include duration or distance tokens there; use duration seconds or distance instead. Set press_lap:true on a timed/distance step to serialize the documented Press lap control; do not put that marker in description. Mutually compatible with description; when both contain structured steps, workout_doc wins and the response surfaces a STEP_SOURCES_OVERRIDDEN warning.",
 			},
 		},
 	}

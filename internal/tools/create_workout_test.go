@@ -28,11 +28,11 @@ func TestCreateWorkoutWithStructuredStepsSerializesDSLAndReturnsReadShape(t *tes
 
 	client := &fakeWorkoutCreatorClient{
 		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
-		workout:           decodeToolWorkouts(t, `{"id":"w-1","name":"Sweet Spot","type":"Ride","folder_id":"f-20","tags":["sweet-spot"],"workout_doc":{"steps":[{"text":"Warmup","duration":600,"power":{"value":65,"units":"%ftp"}},{"duration":300,"freeride":true}],"name":"Sweet Spot"}}`)[0],
+		workout:           decodeToolWorkouts(t, `{"id":"w-1","name":"Sweet Spot","type":"Ride","folder_id":"f-20","tags":["sweet-spot"],"workout_doc":{"steps":[{"text":"Warmup","duration":600,"power":{"value":65,"units":"%ftp"},"press_lap":true},{"duration":300,"freeride":true}],"name":"Sweet Spot"}}`)[0],
 	}
 	tool := newCreateWorkoutTool(client, client, "test", "UTC", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"name":"Sweet Spot","folder_id":"f-20","sport":"Ride","tags":["sweet-spot"],"workout_doc":{"steps":[{"description":"Warmup","duration":600,"power":{"value":65,"units":"PERCENT_FTP"}},{"duration":300,"freeride":true}]}}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"name":"Sweet Spot","folder_id":"f-20","sport":"Ride","tags":["sweet-spot"],"workout_doc":{"steps":[{"description":"Warmup","duration":600,"power":{"value":65,"units":"PERCENT_FTP"},"press_lap":true},{"duration":300,"freeride":true}]}}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestCreateWorkoutWithStructuredStepsSerializesDSLAndReturnsReadShape(t *tes
 	if call.Name != "Sweet Spot" || call.FolderID != "f-20" || call.Sport != "Ride" {
 		t.Fatalf("write params = %#v, want create inputs", call)
 	}
-	if call.Description == nil || *call.Description != "- Warmup 10m 65%\n- 5m freeride" {
+	if call.Description == nil || *call.Description != "- Press lap Warmup 10m 65%\n- 5m freeride" {
 		t.Fatalf("description DSL = %#v, want serialized workout_doc", call.Description)
 	}
 	if !reflect.DeepEqual(call.Tags, []string{"sweet-spot"}) {
@@ -207,6 +207,18 @@ func TestWorkoutDocRenderWarningDetectsPartialFidelityLoss(t *testing.T) {
 	warning := workoutDocRenderWarning(uploaded, upstream)
 	if !strings.Contains(warning, "partially parsed") {
 		t.Fatalf("workoutDocRenderWarning() = %q, want partial-fidelity warning", warning)
+	}
+}
+
+func TestWorkoutDocRenderWarningDetectsMissingPressLapControl(t *testing.T) {
+	t.Parallel()
+
+	uploaded := &workoutdoc.WorkoutDoc{Steps: []workoutdoc.Step{{Description: "Warm up", Duration: 1200, PressLap: true}}}
+	upstream := map[string]any{"steps": []any{map[string]any{"text": "Warm up", "duration": float64(1200)}}}
+
+	warning := workoutDocRenderWarning(uploaded, upstream)
+	if warning != workoutDocPartialFidelityWarning {
+		t.Fatalf("workoutDocRenderWarning() = %q, want Press lap fidelity warning", warning)
 	}
 }
 

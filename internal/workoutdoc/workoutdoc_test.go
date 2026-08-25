@@ -29,6 +29,42 @@ func TestGoldenRoundTripParseSerialize(t *testing.T) {
 	}
 }
 
+func TestPressLapStepRoundTripsThroughCanonicalDSL(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		dsl  string
+		want string
+	}{
+		{name: "leading marker", dsl: "- Press lap Warm up when ready 20m 50%", want: "- Press lap Warm up when ready 20m 50%"},
+		{name: "trailing marker accepted by upstream grammar", dsl: "- Warm up when ready 20m 50% Press lap", want: "- Press lap Warm up when ready 20m 50%"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Parse(tc.dsl)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if len(got.Steps) != 1 {
+				t.Fatalf("Parse() steps = %#v, want one step", got.Steps)
+			}
+			if got.Steps[0].Description != "Warm up when ready" {
+				t.Fatalf("Parse() description = %q, want Press lap control removed from the athlete prompt", got.Steps[0].Description)
+			}
+			if !got.Steps[0].PressLap {
+				t.Fatalf("Parse() step = %#v, want PressLap true", got.Steps[0])
+			}
+			canonical, err := Serialize(got)
+			if err != nil {
+				t.Fatalf("Serialize(Parse()) error = %v", err)
+			}
+			if canonical != tc.want {
+				t.Fatalf("Serialize(Parse()) = %q, want %q", canonical, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoldenRoundTripStructuredSerializeParse(t *testing.T) {
 	for _, tc := range goldenCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
@@ -464,10 +500,12 @@ func TestSerializeRejectsDurationOrDistanceTokensInStepDescription(t *testing.T)
 	for _, tc := range []struct {
 		name        string
 		description string
+		guidance    string
 	}{
-		{name: "duration", description: "Endurance 2h15m"},
-		{name: "duration with punctuation", description: "Warm up (45m)"},
-		{name: "distance", description: "5km pace"},
+		{name: "duration", description: "Endurance 2h15m", guidance: "duration/distance in structured fields"},
+		{name: "duration with punctuation", description: "Warm up (45m)", guidance: "duration/distance in structured fields"},
+		{name: "distance", description: "5km pace", guidance: "duration/distance in structured fields"},
+		{name: "press lap", description: "Press lap when ready", guidance: "press_lap:true"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := WorkoutDoc{Steps: []Step{{Description: tc.description, Duration: 8100, Power: &Target{Value: floatPtr(60), Units: "PERCENT_FTP"}}}}
@@ -479,8 +517,8 @@ func TestSerializeRejectsDurationOrDistanceTokensInStepDescription(t *testing.T)
 			if !errors.As(err, &structural) {
 				t.Fatalf("Serialize() error = %T, want *StructuralTokenInDescriptionError", err)
 			}
-			if !strings.Contains(err.Error(), "duration/distance in structured fields") {
-				t.Fatalf("error = %q, want structured-field guidance", err.Error())
+			if !strings.Contains(err.Error(), tc.guidance) {
+				t.Fatalf("error = %q, want guidance %q", err.Error(), tc.guidance)
 			}
 		})
 	}

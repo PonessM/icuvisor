@@ -23,6 +23,7 @@ type Step struct {
 
 	Ramp     bool   `json:"ramp,omitempty"`
 	Freeride bool   `json:"freeride,omitempty"`
+	PressLap bool   `json:"press_lap,omitempty"`
 	Reps     int    `json:"reps,omitempty"`
 	Steps    []Step `json:"steps,omitempty"`
 }

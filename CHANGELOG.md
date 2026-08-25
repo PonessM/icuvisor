@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Structured workout steps now accept `press_lap: true`, which serializes the documented Intervals.icu `Press lap` marker while retaining a required duration or distance for planned load estimates. The workout-syntax resource documents Garmin-focused device support and fidelity warnings remain explicit when the returned workout document omits the control.
+
 ### Changed
 
 - Disabled automatic Winget manifest submission until the fork token can execute `UpdateRef`; the manual recovery workflow remains available.

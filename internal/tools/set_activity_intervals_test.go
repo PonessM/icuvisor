@@ -90,6 +90,46 @@ func TestSetActivityIntervalsWarnsWhenUpstreamDidNotRender(t *testing.T) {
 	}
 }
 
+func TestSetActivityIntervalsWarnsWhenUpstreamDropsPressLap(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeActivityUpdaterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345"}},
+		activity:          decodeActivity(t, `{"id":"a1","icu_intervals":[{"id":1,"name":"Warm up"}],"workout_doc":{"steps":[{"text":"Warm up","duration":600}]}}`),
+	}
+	tool := newSetActivityIntervalsTool(client, client, "test", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"a1","workout_doc":{"steps":[{"description":"Warm up","duration":600,"press_lap":true}]}}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	warning, _ := meta["workout_doc_warning"].(string)
+	if warning != workoutDocPartialFidelityWarning {
+		t.Fatalf("workout_doc_warning = %q, want Press lap partial-fidelity warning", warning)
+	}
+}
+
+func TestSetActivityIntervalsWarnsWhenUpstreamCannotVerifyPressLap(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeActivityUpdaterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345"}},
+		activity:          decodeActivity(t, `{"id":"a1","icu_intervals":[{"id":1,"name":"Warm up"}]}`),
+	}
+	tool := newSetActivityIntervalsTool(client, client, "test", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"a1","workout_doc":{"steps":[{"description":"Warm up","duration":600,"press_lap":true}]}}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	warning, _ := meta["workout_doc_warning"].(string)
+	if !strings.Contains(warning, "could not verify Press lap") {
+		t.Fatalf("workout_doc_warning = %q, want explicit Press lap fidelity caveat", warning)
+	}
+}
+
 func TestSetActivityIntervalsRejectsBadArguments(t *testing.T) {
 	t.Parallel()
 

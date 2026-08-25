@@ -200,25 +200,15 @@ func TestValidateWorkoutProsePassesThroughVerbatim(t *testing.T) {
 	}
 }
 
-func TestValidateWorkoutRejectsInventedPressLapField(t *testing.T) {
+func TestValidateWorkoutAcceptsPressLapStep(t *testing.T) {
 	t.Parallel()
 
-	tool := newValidateWorkoutTool("test", false)
-	_, err := tool.Handler(context.Background(), Request{
-		Name:      validateWorkoutName,
-		Arguments: json.RawMessage(`{"workout_doc":{"steps":[{"description":"Press lap when ready","duration":600,"press_lap":true}]}}`),
-	})
-	if err == nil {
-		t.Fatal("Handler() error = nil, want unknown structured field rejection")
+	resp := runValidateWorkout(t, `{"workout_doc":{"steps":[{"description":"Warm up when ready","duration":600,"power":{"value":50,"units":"PERCENT_FTP"},"press_lap":true}]}}`)
+	if !resp.Valid {
+		t.Fatalf("Valid = false, want true; errors=%+v", resp.Errors)
 	}
-	message, ok := PublicErrorMessage(err)
-	if !ok {
-		t.Fatalf("PublicErrorMessage(%v) did not expose a user-facing diagnostic", err)
-	}
-	for _, want := range []string{"invalid validate_workout arguments", `unknown field "press_lap"`} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("PublicErrorMessage = %q, want %q", message, want)
-		}
+	if resp.CanonicalDSL != "- Press lap Warm up when ready 10m 50%" {
+		t.Fatalf("CanonicalDSL = %q, want canonical Press lap DSL", resp.CanonicalDSL)
 	}
 }
 

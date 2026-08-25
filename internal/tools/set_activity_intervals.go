@@ -91,7 +91,7 @@ func setActivityIntervalsHandler(client ActivityUpdaterClient, profileClient Pro
 				Destructive:          true,
 				SourceEndpoint:       "/activity/{activityId}",
 				IntervalSourceIntent: "structured_workout",
-				WorkoutDocWarning:    activityIntervalsWorkoutDocWarning(activity),
+				WorkoutDocWarning:    activityIntervalsWorkoutDocWarning(args.WorkoutDoc, activity),
 				IncludeFull:          args.IncludeFull,
 			},
 		}
@@ -143,20 +143,45 @@ func buildActivityIntervalsDescription(doc workoutdoc.WorkoutDoc, prose string, 
 	return merged, nil
 }
 
-func activityIntervalsWorkoutDocWarning(activity intervals.Activity) string {
-	// Mirrors workoutDocRenderWarning's intent: if upstream stored the description
-	// but did not surface a parsed workout_doc, the structured intervals may not
-	// be rendered. The activity payload's icu_intervals field is the canonical
-	// post-parse signal; absent or empty means the DSL was kept as plain text.
+func activityIntervalsWorkoutDocWarning(uploaded *workoutdoc.WorkoutDoc, activity intervals.Activity) string {
+	// The activity payload's icu_intervals field signals whether upstream parsed
+	// the DSL. Press Lap additionally requires a returned workout_doc for
+	// control-level fidelity verification.
 	if activity.Raw == nil {
+		if workoutDocContainsPressLap(uploaded) {
+			return "intervals.icu did not return structured-workout evidence; could not verify Press lap fidelity"
+		}
 		return ""
 	}
+	rendered := false
 	if value, ok := activity.Raw["icu_intervals"]; ok {
 		if list, ok := value.([]any); ok && len(list) > 0 {
-			return ""
+			rendered = true
 		}
 	}
-	return "intervals.icu accepted the description but did not parse the workout_doc into rendered intervals; verify the DSL with validate_workout (see icuvisor://workout-syntax)"
+	if !rendered {
+		return "intervals.icu accepted the description but did not parse the workout_doc into rendered intervals; verify the DSL with validate_workout (see icuvisor://workout-syntax)"
+	}
+	if !workoutDocContainsPressLap(uploaded) {
+		return ""
+	}
+	upstreamDoc, ok := activity.Raw["workout_doc"]
+	if !ok {
+		return "intervals.icu rendered intervals but did not return structured-workout evidence; could not verify Press lap fidelity"
+	}
+	return workoutDocRenderWarning(uploaded, upstreamDoc)
+}
+
+func workoutDocContainsPressLap(doc *workoutdoc.WorkoutDoc) bool {
+	if doc == nil {
+		return false
+	}
+	for _, step := range doc.Steps {
+		if step.PressLap || workoutDocContainsPressLap(&workoutdoc.WorkoutDoc{Steps: step.Steps}) {
+			return true
+		}
+	}
+	return false
 }
 
 func setActivityIntervalsInputSchema() map[string]any {
@@ -166,7 +191,7 @@ func setActivityIntervalsInputSchema() map[string]any {
 		"required":             []string{"activity_id", "workout_doc"},
 		"properties": map[string]any{
 			"activity_id":  map[string]any{"type": "string", "description": "Required intervals.icu activity ID whose interval structure will be (re)written. Surrounding whitespace is trimmed; the i-prefix is preserved verbatim."},
-			"workout_doc":  map[string]any{"type": "object", "description": "Required structured WorkoutDoc whose steps are serialized to the activity description DSL; intervals.icu re-parses the DSL into rendered intervals. Must contain at least one step. In each structured step, description is a label/comment only: do not include duration or distance tokens there; use duration seconds or distance instead. Syntax reference: icuvisor://workout-syntax. Call validate_workout first if uncertain about the DSL."},
+			"workout_doc":  map[string]any{"type": "object", "description": "Required structured WorkoutDoc whose steps are serialized to the activity description DSL; intervals.icu re-parses the DSL into rendered intervals. Must contain at least one step. In each structured step, description is a label/comment only: do not include duration or distance tokens there; use duration seconds or distance instead. Set press_lap:true on a timed/distance step to serialize the documented Press lap control; do not put that marker in description. Syntax reference: icuvisor://workout-syntax. Call validate_workout first if uncertain about the DSL."},
 			"prose":        map[string]any{"type": "string", "description": "Optional free-text prose to interleave around the serialized steps; the upstream description retains the prose verbatim around the DSL block. Use the " + workoutdoc.StepsSentinel + " sentinel on its own line to choose where serialized steps are inserted. Omit to send the serialized DSL alone."},
 			"include_full": map[string]any{"type": "boolean", "default": false, "description": "When true, include the raw upstream updated-activity payload under full; default returns a terse confirmation."},
 		},
@@ -174,5 +199,5 @@ func setActivityIntervalsInputSchema() map[string]any {
 }
 
 func setActivityIntervalsOutputSchema() map[string]any {
-	return map[string]any{"type": "object", "additionalProperties": true, "description": "Destructive activity-intervals write confirmation: activity_id, status, workout_doc_uploaded marker, and _meta with destructive=true, source_endpoint, interval_source_intent=structured_workout (so downstream readers know the interval set is structured, not device auto-laps), workout_doc_warning when upstream stored the description but did not parse the DSL into rendered intervals, and normalized athlete_id when available."}
+	return map[string]any{"type": "object", "additionalProperties": true, "description": "Destructive activity-intervals write confirmation: activity_id, status, workout_doc_uploaded marker, and _meta with destructive=true, source_endpoint, interval_source_intent=structured_workout (so downstream readers know the interval set is structured, not device auto-laps), workout_doc_warning when upstream did not render the DSL or when Press Lap fidelity cannot be verified from its returned structured workout, and normalized athlete_id when available."}
 }

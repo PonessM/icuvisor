@@ -107,9 +107,10 @@ func WorkoutTargetUnitSyntax() []TargetUnitSyntax {
 func WorkoutSyntaxSpec() SyntaxSpec {
 	return SyntaxSpec{
 		CheatSheet: SyntaxCheatSheet{
-			Form: "Simple step: `- [description] [duration|distance] [primary target] [optional cadence]`. In structured WorkoutDoc JSON, step `description` is only a label/comment; put duration or distance in its own field, not in the label. Repeat block: `Nx` header with two-space-indented child steps. Use one primary target per step (power OR HR OR pace OR RPE OR freeride).",
+			Form: "Simple step: `- [description] [duration|distance] [primary target] [optional cadence]`. In structured WorkoutDoc JSON, step `description` is only a label/comment; put duration or distance in its own field, not in the label. Set `press_lap: true` on a timed/distance step to make its device-control marker canonical. Repeat block: `Nx` header with two-space-indented child steps. Use one primary target per step (power OR HR OR pace OR RPE OR freeride).",
 			Examples: []SyntaxCheatExample{
 				{Label: "Duration step", DSL: "- Endurance 10m 75%"},
+				{Label: "Press Lap step", DSL: "- Press lap Warm up when ready 20m 50%"},
 				{Label: "Distance step", DSL: "- Stride 400mtr 120%"},
 				{Label: "Yard swim step", DSL: "- Swim 100yrd 95% Pace"},
 				{Label: "Repeat block", DSL: "Main set 3x\n  - Hard 2m 105-115% 95-105rpm\n  - Easy 1m freeride"},
@@ -137,6 +138,16 @@ func WorkoutSyntaxSpec() SyntaxSpec {
 					{Key: "distance_mi", Description: "Mile distance canonicalizes to mi.", Step: Step{Description: "Cooldown", Distance: &Length{Value: 1, Unit: "miles"}, Freeride: true}},
 					{Key: "distance_yd", Description: "Yard distance canonicalizes to yrd.", Step: Step{Description: "Swim", Distance: &Length{Value: 100, Unit: "yards"}, Pace: targetValue(95, "PERCENT_THRESHOLD")}},
 				},
+			},
+			{
+				Key:         "press_lap",
+				Title:       "Press Lap steps",
+				Description: "Set `press_lap: true` on a timed or distance step to serialize the canonical `Press lap` marker. The duration/distance remains the planned duration/load estimate. Intervals.icu documents Garmin Connect support; behavior on other devices is device-dependent and unverified.",
+				Examples: []SyntaxExample{{
+					Key:         "press_lap_duration",
+					Description: "A manually advanced warmup with a 20-minute planning estimate.",
+					Step:        Step{Description: "Warm up when ready", Duration: 1200, Power: targetValue(50, "PERCENT_FTP"), PressLap: true},
+				}},
 			},
 			{
 				Key:         "repeats",
@@ -220,11 +231,13 @@ func WorkoutSyntaxSpec() SyntaxSpec {
 			{Key: "freeride_not_ramp", Description: "Freeride cannot be combined with ramp or another primary target."},
 			{Key: "repeat_fields", Description: "Repeat blocks require reps greater than zero and child steps, cannot be nested, and cannot also carry simple-step fields."},
 			{Key: "simple_step_duration_or_distance", Description: "Simple steps require a positive duration or a supported distance."},
+			{Key: "press_lap_requires_measure", Description: "Press Lap is a control on a timed or distance step, not an open step: retain a positive duration or distance for planned duration/load estimates."},
 			{Key: "step_description_label_only", Description: "Structured WorkoutDoc step descriptions are labels/comments only. Do not include duration or distance tokens there; use the duration or distance fields so the serialized DSL has exactly one duration/distance source."},
 		},
 		CommonMistakes: []SyntaxMistake{
 			{Key: "m_is_minutes", Description: "`m` is minutes, never meters. Use `mtr` for meters (e.g. `500mtr`, not `500m`)."},
 			{Key: "no_duration_or_distance_in_step_description", Description: "In structured WorkoutDoc JSON, do not put tokens like `2h15m`, `45m`, `400mtr`, or `5km` in a step description. Use exactly one source: duration seconds or distance fields."},
+			{Key: "press_lap_is_a_field", Description: "Set `press_lap: true`; do not include `Press lap` in a structured step description. icuvisor emits the canonical marker and keeps the description as the athlete-facing prompt."},
 			{Key: "one_primary_target_per_step", Description: "One primary target per step. Use power OR HR OR pace OR RPE (plus optional cadence). Mixing primary targets in one step is rejected."},
 			{Key: "no_nested_repeats", Description: "No nested repeats. An `Nx` block cannot contain another `Nx` block."},
 			{Key: "repeat_header_carries_only_reps", Description: "Repeat headers carry only `Nx` and an optional label. Duration and targets belong on the child steps, not the header."},

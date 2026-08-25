@@ -59,6 +59,7 @@ func uploadedWorkoutDocSignature(steps []workoutdoc.Step) []string {
 			targetFamily:  uploadedTargetFamily(step),
 			cadence:       step.Cadence != nil,
 			freeride:      step.Freeride,
+			pressLap:      step.PressLap,
 			distanceBased: step.Distance != nil,
 		}))
 	}
@@ -89,6 +90,7 @@ func upstreamWorkoutDocSignature(value any) []string {
 				targetFamily:  upstreamTargetFamily(step),
 				cadence:       firstPresent(step, "cadence") != nil,
 				freeride:      anyBool(firstPresent(step, "freeride")),
+				pressLap:      anyBool(firstPresent(step, "press_lap")),
 				distanceBased: hasDistance,
 			}))
 		}
@@ -105,6 +107,7 @@ type signatureStep struct {
 	targetFamily  string
 	cadence       bool
 	freeride      bool
+	pressLap      bool
 	distanceBased bool
 }
 
@@ -120,6 +123,7 @@ func simpleStepSignature(step signatureStep) string {
 		"target=" + step.targetFamily,
 		"cadence=" + strconv.FormatBool(step.cadence),
 		"freeride=" + strconv.FormatBool(step.freeride),
+		"press_lap=" + strconv.FormatBool(step.pressLap),
 	}, "|")
 }
 

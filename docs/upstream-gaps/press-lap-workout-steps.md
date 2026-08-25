@@ -2,37 +2,31 @@
 
 ## Decision
 
-**Decision: `unverified`.**
+**Decision: `supported` for the intervals.icu description DSL.**
 
-As of 2026-07-24, current public upstream evidence was unavailable for this
-task because live or authenticated upstream access is prohibited. The local
-baseline contains no portable, round-trippable representation for “press lap
-when ready,” but that absence is not attributed to the current upstream API.
-The decision rule is conservative: this request is `supported` only when a
-public upstream grammar/schema names the control and a returned-document example
-proves that it survives a write/read round trip; it is `unsupported` only when
-upstream explicitly says the control is unavailable; otherwise it is
-`unverified`. The current evidence cannot establish either positive condition.
+On 2026-08-25, the public Intervals.icu Workout Builder guide explicitly
+documents an “End when lap button pressed” option that inserts `Press lap` into
+a timed workout step, including `- Press lap when ready 20m 50%`. It says the
+time is used to calculate planned duration and load, while a compatible device
+continues the step until the Lap button is pressed. The guide documents Garmin
+via Garmin Connect integration; it does not establish universal device support.
 
-This is a documentation and validation boundary, not a device feature. icuvisor
-must not add a `press_lap`, `lap_button`, `manual_lap`, or similar structured
-field, DSL token, serializer branch, or device-specific writer based on an
-assistant request or a vendor convention.
+icuvisor exposes this documented text-grammar control as the structured
+`press_lap: true` step field. It serializes the canonical `Press lap` marker
+into the only verified upstream write channel (`description`) and parses that
+marker back from DSL. The field is an icuvisor representation, not an invented
+upstream JSON write field: the public OpenAPI schema still exposes
+`workout_doc` generically and does not declare a dedicated `press_lap`
+property.
 
 ## Reproducible evidence record
 
-### Public source references (current contents not fetched)
-
-These are the exact public sources identified for a future re-check. They are
-recorded here for reproducibility, but are not claimed as consulted current
-evidence: task policy prohibited a live request, and no public documentation
-snapshot containing a press-lap contract is checked in. A future re-check must
-record its retrieval date and the excerpt it observes.
+### Public source references
 
 | Source | Exact area to inspect | Evidence available in this task | Retrieval/provenance |
 | --- | --- | --- | --- |
-| <https://intervals.icu/api-docs.html> | API documentation landing page and linked workout/event operations | No current excerpt was available locally; the URL is referenced by existing repository evidence records. | Reference recorded in `docs/upstream-gaps/periodization-parameters.md`; URL recorded 2026-07-24; not fetched in this task. |
-| <https://intervals.icu/api/v1/docs> | `components.schemas.Workout.properties.description`, `components.schemas.Workout.properties.workout_doc`, and workout/event create/read operations | Local snapshot only: `description` is `{"type":"string"}` and `workout_doc` is `{"type":"object","additionalProperties":{"type":"object"}}`; neither local entry defines a press-lap field. | `scripts/openapidiff/baseline/intervals-openapi.json`, revision `b61b6e6b431bb49473f5222cd761e29f68aa6892`, inspected 2026-07-24; URL not fetched. |
+| <https://forum.intervals.icu/t/workout-builder/1163/149> | Workout Builder “End when lap button pressed” guidance | Documents the `Press lap` text marker, a timed example, Garmin Connect scope, and that the time is used for planned duration/load while the device waits for the lap button. | Retrieved 2026-08-25. |
+| <https://intervals.icu/api/v1/docs> | `components.schemas.Workout.properties.description`, `components.schemas.Workout.properties.workout_doc`, and workout/event create/read operations | Live schema version `v1.0.0` names `description` and generic `workout_doc`; it does not name a dedicated press-lap JSON property. | Retrieved 2026-08-25. |
 
 The local snapshot is implementation evidence, not current public-upstream
 proof. In particular, its missing field cannot establish that the live API
@@ -45,13 +39,14 @@ The following local files describe what icuvisor can safely represent and test;
 they do not establish Garmin, Wahoo, or intervals.icu execution behavior:
 
 - `internal/workoutdoc/types.go`: `Step` has description, duration/distance,
-  power/HR/pace/RPE/cadence targets, ramp/freeride, and repeat fields only.
+  power/HR/pace/RPE/cadence targets, ramp/freeride, repeat fields, and the
+  icuvisor-owned `press_lap` representation.
 - `internal/workoutdoc/parse.go` and `serialize.go`: the canonical grammar is
   line-oriented: `- [label] [duration|distance] [target]`, with `Nx` repeat
-  headers and indented child steps. There is no press-lap token.
+  headers and indented child steps. `press_lap` serializes as `Press lap` and
+  parses from that marker at any position in a simple step.
 - `internal/workoutdoc/syntax.go`: the published local syntax reference lists
-  duration/distance, repeats, ramps, freeride, targets, and cadence; it does
-  not list device-control steps.
+  duration/distance, Press Lap, repeats, ramps, freeride, targets, and cadence.
 - `internal/workoutdoc/testdata/`: checked-in DSL/structured pairs prove local
   parser/serializer behavior. The `06-full-surface-upstream-response-workout-doc.json`
   file is a sanitized historical capture with documented partial fidelity loss,
@@ -70,25 +65,19 @@ they do not establish Garmin, Wahoo, or intervals.icu execution behavior:
 
 ## What the evidence does and does not show
 
-Positive evidence establishes only the existing endurance-workout grammar:
-structured steps have a measure (duration or distance), optional supported
-training targets, and known repeat/ramp/free-ride forms. A label such as
-`Press lap when ready` remains a free-text description label. It does not
-become a structured control merely because it appears beside a valid duration
-or target, and prose such as `Press lap when ready before the next interval`
-is not a verified instruction to a watch or head unit.
+Positive evidence establishes the existing endurance-workout grammar plus the
+`Press lap` control marker on a timed/distance step. ICUVisor models that marker
+with `press_lap: true`; it must not be duplicated in `description`, because the
+serializer owns its canonical placement. A `Press lap` line without a duration
+or distance remains invalid: the public guide requires time to calculate the
+planned duration and load.
 
-Negative evidence is equally important: the local schema snapshot and local
-WorkoutDoc types do not name a press-lap/manual-lap field or portable
-device-control token, while current public evidence was not available to
-confirm whether upstream has added one. The available repository-held
-returned-document evidence contains no such control field or public
-round-trip example; it is a local historical fixture, not a current upstream
-claim. A model-controlled invented JSON key must therefore fail strict
-structured input validation rather than be silently converted into a step or
-ordinary duration semantics. A prose fallback may be stored as prose only when
-the user explicitly wants a note; it must never be presented as
-device-compatible control.
+The public API schema still does not establish an upstream structured JSON
+field. ICUVisor therefore never sends `workout_doc` upstream and never claims
+that a returned generic `workout_doc` alone proves device compatibility. Its
+write-fidelity check includes the control when an upstream returned document
+exposes `press_lap`; absence of that field produces the usual partial-fidelity
+warning rather than a compatibility claim.
 
 Garmin and Wahoo execution behavior is not established by the intervals.icu
 DSL. Device workout-upload capabilities, whether a device exposes a manual lap
@@ -98,33 +87,16 @@ load semantics may be inferred from a hypothetical press-lap action. In
 particular, a manual lap is not a substitute for a timed or distance step in
 load calculations.
 
-## Future supported-branch prerequisites
+## Remaining verification boundary
 
-Before opening a separate implementation task, obtain all of the following
-from public upstream documentation or an explicitly approved synthetic/local
-fixture exercise:
+The current evidence supports authoring the documented DSL marker and its
+Garmin-focused caveat. Before claiming support for another device, a distinct
+upstream JSON field, or completed-workout fidelity, obtain device-specific
+public evidence and a sanitized write/read fixture. Until then, an upstream
+response that omits `press_lap` remains partial-fidelity evidence rather than a
+claim that the control was delivered to a device.
 
-1. **Grammar/schema provenance:** a named portable field or DSL token, accepted
-   spelling, scope, and semantics for waiting on a manual lap.
-2. **Fixture provenance:** a sanitized source description and returned
-   `workout_doc`/schema fixture that identifies the upstream version/date and
-   the source operation; no hand-written candidate fixture counts as evidence.
-3. **Local round trip:** `parse → serialize → reparse` equality for the
-   candidate, with any documented lossy fields enumerated and tested.
-4. **Returned-document evidence:** after an approved write/read probe, the
-   returned structured document must preserve the control field; an upload
-   marker or prose echo is insufficient. The test must also assert that a
-   missing/partial fidelity warning blocks a compatibility claim.
-5. **Load semantics:** explicit evidence for estimated duration, TSS/training
-   load, distance, and any wait/manual-lap behavior. If upstream does not define
-   a value, the implementation must report it as unknown rather than estimate
-   it from the control.
-6. **Device caveats:** separate, device-specific public evidence for Garmin and
-   Wahoo (and any other target), including capability differences and what
-   “press lap” means on each. A portable upstream grammar cannot by itself
-   establish either vendor's behavior.
-
-Until those prerequisites are met, the safe authoring choices are a supported
-timed/distance structured step or an explicitly prose note. Do not modify
-`internal/workoutdoc/syntax.go`, add a field/token, or implement a writer in
-this task.
+The supported authoring shape is a timed/distance structured step with
+`press_lap: true`. It remains a Garmin-focused feature according to the public
+Intervals.icu guide; other device behavior must be treated as device-specific
+unless separately documented.

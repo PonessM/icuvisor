@@ -4,12 +4,18 @@ This resource documents the Intervals.icu structured-workout DSL emitted by icuv
 
 ## Cheat sheet
 
-Simple step: `- [description] [duration|distance] [primary target] [optional cadence]`. In structured WorkoutDoc JSON, step `description` is only a label/comment; put duration or distance in its own field, not in the label. Repeat block: `Nx` header with two-space-indented child steps. Use one primary target per step (power OR HR OR pace OR RPE OR freeride).
+Simple step: `- [description] [duration|distance] [primary target] [optional cadence]`. In structured WorkoutDoc JSON, step `description` is only a label/comment; put duration or distance in its own field, not in the label. Set `press_lap: true` on a timed/distance step to make its device-control marker canonical. Repeat block: `Nx` header with two-space-indented child steps. Use one primary target per step (power OR HR OR pace OR RPE OR freeride).
 
 - Duration step:
 
 ```text
 - Endurance 10m 75%
+```
+
+- Press Lap step:
+
+```text
+- Press lap Warm up when ready 20m 50%
 ```
 
 - Distance step:
@@ -106,6 +112,17 @@ Distance steps serialize with canonical mtr, km, mi, or yrd suffixes.
 
 ```text
 - Swim 100yrd 95% Pace
+```
+
+
+### Press Lap steps
+
+Set `press_lap: true` on a timed or distance step to serialize the canonical `Press lap` marker. The duration/distance remains the planned duration/load estimate. Intervals.icu documents Garmin Connect support; behavior on other devices is device-dependent and unverified.
+
+- `press_lap_duration`: A manually advanced warmup with a 20-minute planning estimate.
+
+```text
+- Press lap Warm up when ready 20m 50%
 ```
 
 
@@ -277,12 +294,14 @@ RPE targets support scalar values and ranges.
 - `freeride_not_ramp`: Freeride cannot be combined with ramp or another primary target.
 - `repeat_fields`: Repeat blocks require reps greater than zero and child steps, cannot be nested, and cannot also carry simple-step fields.
 - `simple_step_duration_or_distance`: Simple steps require a positive duration or a supported distance.
+- `press_lap_requires_measure`: Press Lap is a control on a timed or distance step, not an open step: retain a positive duration or distance for planned duration/load estimates.
 - `step_description_label_only`: Structured WorkoutDoc step descriptions are labels/comments only. Do not include duration or distance tokens there; use the duration or distance fields so the serialized DSL has exactly one duration/distance source.
 
 ## Common mistakes
 
 - `m_is_minutes`: `m` is minutes, never meters. Use `mtr` for meters (e.g. `500mtr`, not `500m`).
 - `no_duration_or_distance_in_step_description`: In structured WorkoutDoc JSON, do not put tokens like `2h15m`, `45m`, `400mtr`, or `5km` in a step description. Use exactly one source: duration seconds or distance fields.
+- `press_lap_is_a_field`: Set `press_lap: true`; do not include `Press lap` in a structured step description. icuvisor emits the canonical marker and keeps the description as the athlete-facing prompt.
 - `one_primary_target_per_step`: One primary target per step. Use power OR HR OR pace OR RPE (plus optional cadence). Mixing primary targets in one step is rejected.
 - `no_nested_repeats`: No nested repeats. An `Nx` block cannot contain another `Nx` block.
 - `repeat_header_carries_only_reps`: Repeat headers carry only `Nx` and an optional label. Duration and targets belong on the child steps, not the header.

@@ -54,7 +54,7 @@ func serializeRepeat(step Step, depth int, inRepeat bool, options SerializeOptio
 	if len(step.Steps) == 0 {
 		return nil, unsupported(step, "repeat block requires child steps")
 	}
-	if step.Duration != 0 || step.Distance != nil || step.Power != nil || step.HR != nil || step.Pace != nil || step.RPE != nil || step.Cadence != nil || step.Ramp || step.Freeride {
+	if step.Duration != 0 || step.Distance != nil || step.Power != nil || step.HR != nil || step.Pace != nil || step.RPE != nil || step.Cadence != nil || step.Ramp || step.Freeride || step.PressLap {
 		return nil, unsupported(step, "repeat block cannot also carry simple step fields")
 	}
 
@@ -81,6 +81,9 @@ func serializeSimpleStep(step Step, depth int, options SerializeOptions) (string
 		return "", unsupported(step, "step requires duration or distance")
 	}
 	parts := make([]string, 0, 5)
+	if step.PressLap {
+		parts = append(parts, "Press lap")
+	}
 	if step.Description != "" {
 		parts = append(parts, step.Description)
 	}

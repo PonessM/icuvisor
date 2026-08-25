@@ -78,6 +78,7 @@ func TestWorkoutSyntaxSpecExamplesAreRenderedFromSerializer(t *testing.T) {
 	requiredFeatures := map[string]bool{
 		"duration_steps":     false,
 		"distance_steps":     false,
+		"press_lap":          false,
 		"repeats":            false,
 		"freeride":           false,
 		"ramps":              false,

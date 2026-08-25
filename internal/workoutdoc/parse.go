@@ -93,6 +93,7 @@ func parseSimpleLine(body string) (Step, error) {
 	if len(tokens) == 0 {
 		return Step{}, fmt.Errorf("empty workout step")
 	}
+	pressLap, tokens := extractPressLap(tokens)
 	idx := -1
 	var duration int
 	var distance *Length
@@ -111,7 +112,7 @@ func parseSimpleLine(body string) (Step, error) {
 	if idx < 0 {
 		return Step{}, fmt.Errorf("workout step missing duration or distance: %q", body)
 	}
-	step := Step{Description: strings.Join(tokens[:idx], " "), Duration: duration, Distance: distance}
+	step := Step{Description: strings.Join(tokens[:idx], " "), Duration: duration, Distance: distance, PressLap: pressLap}
 	remaining := tokens[idx+1:]
 	if len(remaining) == 0 {
 		return step, nil
@@ -143,6 +144,20 @@ func parseSimpleLine(body string) (Step, error) {
 		}
 	}
 	return step, nil
+}
+
+func extractPressLap(tokens []string) (bool, []string) {
+	filtered := make([]string, 0, len(tokens))
+	pressLap := false
+	for index := 0; index < len(tokens); index++ {
+		if index+1 < len(tokens) && strings.EqualFold(tokens[index], "press") && strings.EqualFold(tokens[index+1], "lap") {
+			pressLap = true
+			index++
+			continue
+		}
+		filtered = append(filtered, tokens[index])
+	}
+	return pressLap, filtered
 }
 
 func parseTrailingDescriptionTarget(step *Step, tokens []string) bool {

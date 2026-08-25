@@ -48,30 +48,32 @@ structured steps: for `create_workout`, check
 `_meta.workout_doc_warning`. An upload marker, prose, or canonical DSL alone
 does not verify structured rendering or any device-control behavior. A warning
 must be absent or understood, and the returned structured summary/document must
-show the expected structure. Never claim that a phrase such as “press lap when
-ready” is a device instruction unless a separately documented upstream and
-device-specific contract proves it.
+show the expected structure. For a manually advanced step, use the supported
+`press_lap: true` field rather than putting “Press lap” in `description`; keep
+its required duration or distance as the planning estimate. The current public
+Intervals.icu contract documents Garmin Connect support only, so do not claim
+behavior for another device without device-specific evidence.
 
 Rules: use structured `workout_doc` only for endurance workouts supported by
-the intervals.icu DSL. A free-text mention such as “press lap when ready” is a
-note, not a structured control step; do not invent a field or DSL token for it.
-Do not infer Garmin or Wahoo compatibility, manual-lap behavior, TSS, training
-load, duration, or distance semantics from DSL syntax, a valid `canonical_dsl`,
-or a successful upload. Only claim device behavior when returned
-structured-document fidelity evidence and a separate public device contract
-support it. If I ask for gym or strength work, schedule a simple `NOTE` time
-block or a free-text supported calendar event; do not invent exercises, sets,
-reps, or loads as structured workout steps unless my intervals.icu account
-exposes documented strength-training support. Do not dump the whole workout
-library into the chat: pick the relevant folder first, sample only one or two
-examples, and use `include_full:true` only after selecting a specific template
-that needs raw source detail. Do not overwrite an existing library workout;
-create a new one unless I explicitly name one to update. For multiple calendar
-or library writes, validate one representative workout, write one, inspect its
-returned summary and warning, then continue with the rest. For indoor/outdoor
-alternatives to the same planned session, keep only one active calendar workout
-unless I explicitly ask for both; prefer editing/replacing the existing event
-after approval so planned load is not double-counted.
+the intervals.icu DSL. Set `press_lap: true` only on a timed or distance step;
+do not include `Press lap` in its `description`, and do not create an open
+manual-lap step. Do not infer Wahoo or other-device compatibility, actual
+manual-lap behavior, TSS, training load, duration, or distance semantics from a
+valid `canonical_dsl` or a successful upload. Only claim delivery when the
+returned structured-document fidelity evidence supports it. If I ask for gym
+or strength work, schedule a simple `NOTE` time block or a free-text supported
+calendar event; do not invent exercises, sets, reps, or loads as structured
+workout steps unless my intervals.icu account exposes documented
+strength-training support. Do not dump the whole workout library into the chat:
+pick the relevant folder first, sample only one or two examples, and use
+`include_full:true` only after selecting a specific template that needs raw
+source detail. Do not overwrite an existing library workout; create a new one
+unless I explicitly name one to update. For multiple calendar or library writes,
+validate one representative workout, write one, inspect its returned summary
+and warning, then continue with the rest. For indoor/outdoor alternatives to
+the same planned session, keep only one active calendar workout unless I
+explicitly ask for both; prefer editing/replacing the existing event after
+approval so planned load is not double-counted.
 ```
 
 ## What icuvisor does
@@ -83,6 +85,32 @@ after approval so planned load is not double-counted.
 | 3 | [`validate_workout`]({{< relref "/reference/tools#validate_workout" >}}) | Validates a structured `workout_doc` without network access and returns the canonical DSL and duration for the preview. |
 | 4 | [`create_workout`]({{< relref "/reference/tools#create_workout" >}}) or [`add_or_update_event`]({{< relref "/reference/tools#add_or_update_event" >}}) | Saves to the library or schedules it — gated on write mode and approval. |
 | 5 | Returned write response | Confirms the returned structured-step summary and surfaces any fidelity warning. |
+
+## Add a Press Lap step
+
+For a warm-up, recovery, or outdoor segment that should advance when the
+athlete presses Lap, set `press_lap: true` and retain a positive duration or
+distance. ICUVisor serializes it into the Intervals.icu DSL; `description`
+remains the prompt shown to the athlete.
+
+```json
+{
+  "steps": [
+    {
+      "description": "Warm up when ready",
+      "duration": 1200,
+      "power": {"value": 50, "units": "PERCENT_FTP"},
+      "press_lap": true
+    }
+  ]
+}
+```
+
+This produces `- Press lap Warm up when ready 20m 50%`. The 20 minutes are the
+planning estimate; the public Intervals.icu guide documents device delivery via
+Garmin Connect. Run `validate_workout` before saving and inspect the returned
+`workout_doc_warning`: it is explicit when ICUVisor cannot verify that upstream
+preserved the control.
 
 A compact portable `workout_doc` for the VO2max session looks like this. It is
 structured input, not a DSL cheat-sheet, and is sufficient even when the

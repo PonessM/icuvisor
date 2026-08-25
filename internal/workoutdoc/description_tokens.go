@@ -26,6 +26,9 @@ func (e *StructuralTokenInDescriptionError) Error() string {
 	if kind == "" {
 		kind = "duration or distance"
 	}
+	if kind == "press-lap control" {
+		return fmt.Sprintf("%s description contains %s token %q; set press_lap:true instead of including it in description", context, kind, e.Token)
+	}
 	return fmt.Sprintf("%s description contains %s token %q; put duration/distance in structured fields, not in description", context, kind, e.Token)
 }
 
@@ -37,10 +40,14 @@ func descriptionStructuralTokenError(step Step, context string) error {
 }
 
 func structuralTokenInDescription(description string) (token string, kind string, ok bool) {
-	for _, raw := range strings.Fields(description) {
+	tokens := strings.Fields(description)
+	for index, raw := range tokens {
 		candidate := normalizeDescriptionToken(raw)
 		if candidate == "" {
 			continue
+		}
+		if index+1 < len(tokens) && strings.EqualFold(candidate, "press") && strings.EqualFold(normalizeDescriptionToken(tokens[index+1]), "lap") {
+			return "Press lap", "press-lap control", true
 		}
 		lower := strings.ToLower(candidate)
 		if _, parsed := parseDurationToken(lower); parsed {
