@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-08-25
+
 ### Added
 
 - Structured workout steps now accept `press_lap: true`, which serializes the documented Intervals.icu `Press lap` marker while retaining a required duration or distance for planned load estimates. The workout-syntax resource documents Garmin-focused device support and fidelity warnings remain explicit when the returned workout document omits the control.
@@ -15,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Disabled automatic Winget manifest submission until the fork token can execute `UpdateRef`; the manual recovery workflow remains available.
+
+### Fixed
+
+- Regenerated the tool-input schema snapshots after adding structured-workout `press_lap` support, restoring the schema freshness CI guard.
 
 ## [1.6.2] - 2026-08-25
 
@@ -443,7 +449,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.3...HEAD
+[1.6.3]: https://github.com/ricardocabral/icuvisor/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/ricardocabral/icuvisor/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/ricardocabral/icuvisor/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/ricardocabral/icuvisor/compare/v1.5.10...v1.6.0
