@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-08-25
+
+### Fixed
+
+- Clarified the activation and payload descriptions for `compute_zone_time` and `compute_load_balance` so the analyzer catalog does not present them as confusable, and synchronized the generated tool references.
+
 ## [1.6.1] - 2026-08-24
 
 ### Fixed
@@ -428,7 +434,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/ricardocabral/icuvisor/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/ricardocabral/icuvisor/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/ricardocabral/icuvisor/compare/v1.5.10...v1.6.0
 [1.5.10]: https://github.com/ricardocabral/icuvisor/compare/v1.5.9...v1.5.10

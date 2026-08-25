@@ -17,8 +17,8 @@ import (
 const (
 	computeZoneTimeName                = "compute_zone_time"
 	computeLoadBalanceName             = "compute_load_balance"
-	computeZoneTimeDescription         = "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals. Other paths use activity rows."
-	computeLoadBalanceDescription      = "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals. Other paths use activity rows."
+	computeZoneTimeDescription         = "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; return per-zone seconds/shares and polarization metadata; do not fetch get_* rows or streams and reduce them in chat. The power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals; other paths use activity rows."
+	computeLoadBalanceDescription      = "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; return low/moderate/high bucket shares and a classification; do not fetch get_* rows or streams and reduce them in chat. The power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals; other paths use activity rows."
 	invalidComputeZoneArgumentsMessage = "invalid compute zone arguments; provide valid dates, optional sport, and zone_metric power/heart_rate/pace"
 	fetchComputeZoneMessage            = "could not compute zone aggregate; check intervals.icu credentials, athlete ID, and date range"
 	maxComputeActivityCandidates       = 500

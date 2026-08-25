@@ -16,6 +16,18 @@ func TestGenerateToolCatalogUsesCallerContext(t *testing.T) {
 	}
 }
 
+func TestGeneratedToolCatalogHasNoConfusablePairs(t *testing.T) {
+	catalog, err := GenerateToolCatalog(t.Context())
+	if err != nil {
+		t.Fatalf("GenerateToolCatalog() error = %v", err)
+	}
+
+	report := CheckConfusableCatalog(catalog, DefaultConfusableThreshold)
+	if !report.OK() {
+		t.Fatalf("CheckConfusableCatalog() found confusable pairs: %#v", report.Pairs)
+	}
+}
+
 func TestCheckConfusableCatalog(t *testing.T) {
 	tests := []struct {
 		name    string

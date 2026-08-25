@@ -1164,7 +1164,7 @@
   },
   "compute_load_balance": {
     "name": "compute_load_balance",
-    "description": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
+    "description": "Use when the prompt asks whether training distribution is polarized, pyramidal, threshold-heavy, or balanced across low/moderate/high intensity; return low/moderate/high bucket shares and a classification; do not fetch get_* rows or streams and reduce them in chat.",
     "arguments": [
       {
         "name": "end_date",
@@ -1291,7 +1291,7 @@
   },
   "compute_zone_time": {
     "name": "compute_zone_time",
-    "description": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; do not fetch get_* rows or streams and reduce them in chat; the power-summary path selects weekly buckets by inclusive anchor date and cannot derive exact partial-week totals.",
+    "description": "Use when the prompt asks for zone-time totals or intensity distribution (seconds/share in Z1-Zn) across activities in a date window; return per-zone seconds/shares and polarization metadata; do not fetch get_* rows or streams and reduce them in chat.",
     "arguments": [
       {
         "name": "end_date",
