@@ -40,6 +40,8 @@ type addOrUpdateEventRequest struct {
 	Description        *string                `json:"description,omitempty"`
 	WorkoutDoc         *workoutdoc.WorkoutDoc `json:"workout_doc,omitempty"`
 	Tags               []string               `json:"tags,omitempty"`
+	Color              *string                `json:"color,omitempty"`
+	NotOnFitnessChart  *bool                  `json:"not_on_fitness_chart,omitempty"`
 	Indoor             *bool                  `json:"indoor,omitempty"`
 	TargetLoad         *float64               `json:"target_load,omitempty"`
 	DistanceMeters     *float64               `json:"distance_meters,omitempty"`
@@ -152,6 +154,13 @@ func decodeAddOrUpdateEventRequest(raw json.RawMessage) (addOrUpdateEventRequest
 	args.Category = strings.TrimSpace(args.Category)
 	args.Type = strings.TrimSpace(args.Type)
 	args.Name = strings.TrimSpace(args.Name)
+	if args.Color != nil {
+		color := strings.TrimSpace(*args.Color)
+		if color == "" {
+			return args, errors.New("color must be non-empty when provided")
+		}
+		args.Color = &color
+	}
 	args.tagsProvided = fields["tags"]
 	if !validDate(args.Date) {
 		return args, errors.New("date must be athlete-local YYYY-MM-DD")
@@ -191,6 +200,8 @@ func eventWriteParams(args addOrUpdateEventRequest, options workoutdoc.Serialize
 		Description:        args.Description,
 		Tags:               append([]string(nil), args.Tags...),
 		TagsSet:            args.tagsProvided,
+		Color:              args.Color,
+		NotOnFitnessChart:  args.NotOnFitnessChart,
 		Indoor:             args.Indoor,
 		TargetLoad:         args.TargetLoad,
 		DistanceMeters:     args.DistanceMeters,
@@ -308,6 +319,21 @@ func eventMatchesWriteParams(event intervals.Event, params intervals.WriteEventP
 	} else if stringValue(event.Description) != "" {
 		return false
 	}
+	eventColor := strings.TrimSpace(firstNonEmpty(stringValue(event.Color), anyString(event.Raw["color"])))
+	if params.Color != nil {
+		if eventColor != strings.TrimSpace(*params.Color) {
+			return false
+		}
+	} else if eventColor != "" {
+		return false
+	}
+	if params.NotOnFitnessChart != nil {
+		if event.NotOnFitnessChart == nil || *event.NotOnFitnessChart != *params.NotOnFitnessChart {
+			return false
+		}
+	} else if event.NotOnFitnessChart != nil && *event.NotOnFitnessChart {
+		return false
+	}
 	if params.Indoor != nil {
 		if event.Indoor == nil || *event.Indoor != *params.Indoor {
 			return false
@@ -417,6 +443,8 @@ func addOrUpdateEventInputSchema() map[string]any {
 		"description":          map[string]any{"type": "string", "description": "Optional replacement for the upstream event description/DSL, not append-only notes. Omit on updates to leave unchanged. For WORKOUT updates, supplying description without workout_doc can replace existing structured steps; include the desired workout_doc to preserve or merge structure. Preserved verbatim, including whitespace and line breaks. May be supplied with workout_doc; use the " + workoutdoc.StepsSentinel + " sentinel on its own line to choose where serialized steps are inserted."},
 		"workout_doc":          map[string]any{"type": "object", "description": "Optional structured WorkoutDoc. Serialized to the upstream workout DSL and merged with description when both are supplied. For WORKOUT updates, include the desired structured steps when changing prose so the replacement description/DSL preserves the workout structure. In each structured step, description is a label/comment only: do not include duration or distance tokens there; use duration seconds or distance instead. Set press_lap:true on a timed/distance step to serialize the documented Press lap control; do not put that marker in description. Zone targets are serialized using the WORKOUT type and athlete sport settings, adding metric suffixes such as Z2 Power, Z2 HR, or Z2 Pace when needed. Syntax reference: icuvisor://workout-syntax."},
 		"tags":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional replacement event tags, in caller-provided order. Omit to leave unchanged on updates; provide [] to clear all tags."},
+		"color":                map[string]any{"type": "string", "description": "Optional intervals.icu calendar display color. Omit on updates to leave unchanged; surrounding whitespace is trimmed."},
+		"not_on_fitness_chart": map[string]any{"type": "boolean", "description": "Optional intervals.icu flag that hides this event from the Fitness chart. Omit on updates to leave unchanged; set false explicitly to show it."},
 		"indoor":               map[string]any{"type": "boolean", "description": "Optional planned-event indoor/trainer flag. Set true for indoor trainer rides; commonly paired with type VirtualRide, but this boolean controls intervals.icu's Indoor toggle."},
 		"target_load":          map[string]any{"type": "number", "minimum": 0, "description": "Optional planned training load / TSS equivalent when supported upstream."},
 		"distance_meters":      map[string]any{"type": "number", "minimum": 0, "description": "Optional planned distance in meters when supported upstream."},

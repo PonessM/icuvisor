@@ -239,6 +239,10 @@
       "description": "Required upstream event category. Documented upstream categories include WORKOUT, RACE_A, RACE_B, RACE_C, NOTE, PLAN, HOLIDAY, SICK, INJURED, SET_EFTP, FITNESS_DAYS, SEASON_START, TARGET, SET_FITNESS; see icuvisor://event-categories. Custom athlete/account category values are passed through.",
       "type": "string"
     },
+    "color": {
+      "description": "Optional intervals.icu calendar display color. Omit on updates to leave unchanged; surrounding whitespace is trimmed.",
+      "type": "string"
+    },
     "date": {
       "description": "Required athlete-local event date as YYYY-MM-DD; interpreted in the configured athlete timezone.",
       "type": "string"
@@ -282,6 +286,10 @@
     "name": {
       "description": "Event title/name shown on the athlete calendar. Required when creating NOTE events; optional for other supported writes and updates unless upstream requires it.",
       "type": "string"
+    },
+    "not_on_fitness_chart": {
+      "description": "Optional intervals.icu flag that hides this event from the Fitness chart. Omit on updates to leave unchanged; set false explicitly to show it.",
+      "type": "boolean"
     },
     "tags": {
       "description": "Optional replacement event tags, in caller-provided order. Omit to leave unchanged on updates; provide [] to clear all tags.",

@@ -35,6 +35,8 @@ type WriteEventParams struct {
 	Description        *string
 	Tags               []string
 	TagsSet            bool
+	Color              *string
+	NotOnFitnessChart  *bool
 	Indoor             *bool
 	TargetLoad         *float64
 	DistanceMeters     *float64
@@ -57,6 +59,8 @@ type Event struct {
 	PlanApplied       *string  `json:"plan_applied"`
 	Description       *string  `json:"description"`
 	Indoor            *bool    `json:"indoor"`
+	Color             *string  `json:"color"`
+	NotOnFitnessChart *bool    `json:"not_on_fitness_chart"`
 	TrainingLoad      *float64 `json:"icu_training_load"`
 	LoadTarget        *float64 `json:"load_target"`
 	Distance          *float64 `json:"distance"`
@@ -164,6 +168,8 @@ type writeEventPayload struct {
 	Name              string    `json:"name,omitempty"`
 	Description       *string   `json:"description,omitempty"`
 	Tags              *[]string `json:"tags,omitempty"`
+	Color             *string   `json:"color,omitempty"`
+	NotOnFitnessChart *bool     `json:"not_on_fitness_chart,omitempty"`
 	Indoor            *bool     `json:"indoor,omitempty"`
 	LoadTarget        *float64  `json:"load_target,omitempty"`
 	DistanceTarget    *float64  `json:"distance_target,omitempty"`
@@ -180,6 +186,11 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 	if category == "" {
 		return writeEventPayload{}, fmt.Errorf("writing event: category is required")
 	}
+	color := params.Color
+	if color != nil {
+		trimmed := strings.TrimSpace(*color)
+		color = &trimmed
+	}
 	body := writeEventPayload{
 		StartDateLocal:    writeEventStartDateLocal(date, category),
 		ExternalID:        strings.TrimSpace(params.ExternalID),
@@ -187,6 +198,8 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 		Type:              strings.TrimSpace(params.Type),
 		Name:              strings.TrimSpace(params.Name),
 		Description:       params.Description,
+		Color:             color,
+		NotOnFitnessChart: params.NotOnFitnessChart,
 		Indoor:            params.Indoor,
 		LoadTarget:        params.TargetLoad,
 		DistanceTarget:    params.DistanceMeters,

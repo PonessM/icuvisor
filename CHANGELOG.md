@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-08-30
+
+### Added
+
+- `add_or_update_event` now accepts optional `color` and `not_on_fitness_chart` fields and returns them in terse calendar event rows when present.
+
 ## [1.6.3] - 2026-08-25
 
 ### Added
@@ -449,7 +455,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.4...HEAD
+[1.6.4]: https://github.com/ricardocabral/icuvisor/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/ricardocabral/icuvisor/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/ricardocabral/icuvisor/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/ricardocabral/icuvisor/compare/v1.6.0...v1.6.1

@@ -235,6 +235,62 @@ func TestAddOrUpdateEventSendsNoteCreateBody(t *testing.T) {
 	}
 }
 
+func TestAddOrUpdateEventSendsPresentationFields(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var batch []map[string]any
+		if err := json.Unmarshal(body, &batch); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(batch) != 1 || batch[0]["color"] != "#ff8800" || batch[0]["not_on_fitness_chart"] != true {
+			t.Fatalf("request body = %#v, want presentation fields", batch)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"evt-presentation","category":"NOTE","color":"#ff8800","not_on_fitness_chart":true}]`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+	color := " #ff8800 "
+	notOnFitnessChart := true
+	if _, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{Date: "2026-06-02", Category: "NOTE", Name: "Travel", Color: &color, NotOnFitnessChart: &notOnFitnessChart}); err != nil {
+		t.Fatalf("AddOrUpdateEvent() error = %v", err)
+	}
+}
+
+func TestAddOrUpdateEventSendsExplicitFalseForNotOnFitnessChart(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var batch []map[string]any
+		if err := json.Unmarshal(body, &batch); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		value, ok := batch[0]["not_on_fitness_chart"]
+		if !ok || value != false {
+			t.Fatalf("request body = %#v, want explicit not_on_fitness_chart=false", batch)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"evt-visible","category":"NOTE","not_on_fitness_chart":false}]`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+	notOnFitnessChart := false
+	if _, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{Date: "2026-06-03", Category: "NOTE", Name: "Visible", NotOnFitnessChart: &notOnFitnessChart}); err != nil {
+		t.Fatalf("AddOrUpdateEvent() error = %v", err)
+	}
+}
+
 func TestAddOrUpdateEventClosesRetryResponseBodyBeforeNextAttempt(t *testing.T) {
 	t.Parallel()
 

@@ -84,6 +84,36 @@ func TestAddOrUpdateEventCreatePreservesFreeTextTagsAndReadShape(t *testing.T) {
 	}
 }
 
+func TestAddOrUpdateEventAcceptsPresentationFields(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		event:             decodeToolEvents(t, `{"id":"evt-presentation","category":"NOTE","name":"Travel","start_date_local":"2026-06-02T00:00:00","color":"#ff8800","not_on_fitness_chart":true}`)[0],
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-06-02","category":"NOTE","name":"Travel","color":" #ff8800 ","not_on_fitness_chart":true}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("write calls = %d, want 1", len(client.calls))
+	}
+	call := client.calls[0]
+	if call.Color == nil || *call.Color != "#ff8800" {
+		t.Fatalf("color = %#v, want trimmed color", call.Color)
+	}
+	if call.NotOnFitnessChart == nil || !*call.NotOnFitnessChart {
+		t.Fatalf("not_on_fitness_chart = %#v, want true", call.NotOnFitnessChart)
+	}
+
+	row := resultMap(t, result)["event"].(map[string]any)
+	if row["color"] != "#ff8800" || row["not_on_fitness_chart"] != true {
+		t.Fatalf("event row = %#v, want presentation fields", row)
+	}
+}
+
 func TestAddOrUpdateEventAcceptsWeightTrainingAsFreeTextCalendarEvent(t *testing.T) {
 	t.Parallel()
 
@@ -179,11 +209,11 @@ func TestAddOrUpdateEventCreateSkipsExactSameDayDuplicate(t *testing.T) {
 	description := "Tempo prescription"
 	client := &fakeEventWriterClient{
 		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
-		events:            decodeToolEvents(t, `{"id":"evt-existing","category":"WORKOUT","type":"Ride","name":"Tempo","start_date_local":"2026-06-01T00:00:00","description":"Tempo prescription","tags":["tempo"],"indoor":true,"load_target":75,"distance_target":30000,"time_target":3600}`),
+		events:            decodeToolEvents(t, `{"id":"evt-existing","category":"WORKOUT","type":"Ride","name":"Tempo","start_date_local":"2026-06-01T00:00:00","description":"Tempo prescription","tags":["tempo"],"color":"#ff8800","not_on_fitness_chart":true,"indoor":true,"load_target":75,"distance_target":30000,"time_target":3600}`),
 	}
 	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-06-01","category":"WORKOUT","type":"Ride","name":"Tempo","description":"Tempo prescription","tags":["tempo"],"indoor":true,"target_load":75,"distance_meters":30000,"moving_time_seconds":3600}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-06-01","category":"WORKOUT","type":"Ride","name":"Tempo","description":"Tempo prescription","tags":["tempo"],"color":"#ff8800","not_on_fitness_chart":true,"indoor":true,"target_load":75,"distance_meters":30000,"moving_time_seconds":3600}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
@@ -581,6 +611,7 @@ func TestAddOrUpdateEventRejectsBadArguments(t *testing.T) {
 		`{"date":"2026-01-01","category":"WORKOUT"}`,
 		`{"date":"2026-01-01","category":"NOTE"}`,
 		`{"date":"2026-01-01","category":"WORKOUT","type":"Ride","moving_time_seconds":-1}`,
+		`{"date":"2026-01-01","category":"NOTE","name":"Blank color","color":"   "}`,
 		`{"date":"2026-01-01","category":"WORKOUT","type":"Ride","workout_doc":{"steps":[{"description":"10m warmup","duration":600}]}}`,
 	} {
 		if _, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(raw)}); err == nil {
@@ -630,7 +661,7 @@ func TestAddOrUpdateEventRegistrationMetadata(t *testing.T) {
 		t.Fatalf("description = %q, want non-destructive language without confirm", tool.Description)
 	}
 	props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
-	for _, name := range []string{"date", "event_id", "external_id", "category", "type", "name", "description", "workout_doc", "tags", "indoor", "target_load", "distance_meters", "moving_time_seconds", "elapsed_time_seconds"} {
+	for _, name := range []string{"date", "event_id", "external_id", "category", "type", "name", "description", "workout_doc", "tags", "color", "not_on_fitness_chart", "indoor", "target_load", "distance_meters", "moving_time_seconds", "elapsed_time_seconds"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("schema missing %s", name)
 		}
