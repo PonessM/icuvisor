@@ -76,6 +76,42 @@ func TestValidateDescriptionParsesCanonicalYrdDistanceWithoutMAmbiguity(t *testi
 	}
 }
 
+func TestValidateDocRejectsOutOfRangeAndInvertedTargetBounds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		doc  WorkoutDoc
+		want string
+	}{
+		{name: "zone below lower boundary", doc: WorkoutDoc{Steps: []Step{{Duration: 60, Pace: targetValue(0, "PACE_ZONE")}}}, want: "zone targets must use whole-number zones Z1 through Z7"},
+		{name: "zone above upper boundary", doc: WorkoutDoc{Steps: []Step{{Duration: 60, Power: targetValue(8, "POWER_ZONE")}}}, want: "zone targets must use whole-number zones Z1 through Z7"},
+		{name: "fractional zone", doc: WorkoutDoc{Steps: []Step{{Duration: 60, HR: targetValue(2.5, "HR_ZONE")}}}, want: "zone targets must use whole-number zones Z1 through Z7"},
+		{name: "inverted pace range", doc: WorkoutDoc{Steps: []Step{{Duration: 60, Pace: targetRange(330, 300, "MINS_KM")}}}, want: "range minimum must be less than or equal to maximum"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := ValidateDoc(tc.doc)
+			if len(result.Errors) == 0 || !strings.Contains(result.Errors[len(result.Errors)-1].Message, tc.want) {
+				t.Fatalf("ValidateDoc() errors = %+v, want %q", result.Errors, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateDocAcceptsZoneBoundaryEndpoints(t *testing.T) {
+	t.Parallel()
+
+	doc := WorkoutDoc{Steps: []Step{
+		{Description: "Recovery", Duration: 120, Pace: targetValue(1, "PACE_ZONE")},
+		{Description: "Top zone", Duration: 30, Power: targetValue(7, "POWER_ZONE")},
+	}}
+	result := ValidateDoc(doc)
+	if len(result.Errors) != 0 {
+		t.Fatalf("ValidateDoc() errors = %+v, want Z1 and Z7 accepted", result.Errors)
+	}
+}
+
 func TestValidateDescriptionParsesYardsDistanceAlias(t *testing.T) {
 	t.Parallel()
 
@@ -158,9 +194,9 @@ func TestValidateDocMixedPrimaryTargets(t *testing.T) {
 	hr := ptrFloat(150)
 	doc := WorkoutDoc{Steps: []Step{{Duration: 600, Power: &Target{Value: v, Units: "WATTS"}, HR: &Target{Value: hr, Units: "BPM"}}}}
 	got := ValidateDoc(doc)
-	codes := warningCodes(got.Warnings)
-	if !diagListContains(codes, "MIXED_PRIMARY_TARGETS") {
-		t.Fatalf("expected MIXED_PRIMARY_TARGETS, got warnings %+v", codes)
+	codes := warningCodes(got.Errors)
+	if !diagListContains(codes, "CONFLICTING_PRIMARY_TARGETS") {
+		t.Fatalf("expected CONFLICTING_PRIMARY_TARGETS, got errors %+v", codes)
 	}
 }
 

@@ -181,6 +181,9 @@ func formatTarget(family string, target Target, ramp bool, options SerializeOpti
 			return "", err
 		}
 		if syntax.Zone {
+			if err := validateZoneBounds(lo, hi, ranged); err != nil {
+				return "", err
+			}
 			suffix := syntax.Suffix
 			if explicitZoneMetricSuffixes(options) {
 				suffix = explicitZoneMetricSuffix(family, suffix)
@@ -206,6 +209,13 @@ func isFractionalPercentPoint(value float64) bool {
 	return value > 0 && value < 1
 }
 
+func validateZoneBounds(lo float64, hi float64, ranged bool) error {
+	if lo < 1 || lo > 7 || math.Trunc(lo) != lo || (ranged && (hi < 1 || hi > 7 || math.Trunc(hi) != hi)) {
+		return fmt.Errorf("zone targets must use whole-number zones Z1 through Z7")
+	}
+	return nil
+}
+
 func explicitZoneMetricSuffixes(options SerializeOptions) bool {
 	switch canonicalUnit(options.WorkoutOrder) {
 	case "POWER_HR_PACE", "POWER_PACE_HR", "HR_POWER_PACE", "HR_PACE_POWER", "PACE_POWER_HR", "PACE_HR_POWER":
@@ -229,16 +239,26 @@ func explicitZoneMetricSuffix(family string, fallback string) string {
 }
 
 func isAbsolutePaceUnit(unit string) bool {
-	return unit == "MINS_KM" || unit == "MINS_MILE"
+	switch unit {
+	case "MINS_KM", "MINS_MILE", "SECS_100M", "SECS_100Y":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatAbsolutePaceTarget(lo, hi float64, ranged bool, unit string) (string, error) {
 	if lo <= 0 || (ranged && hi <= 0) {
 		return "", fmt.Errorf("absolute pace targets must be positive")
 	}
-	suffix := "/km"
-	if unit == "MINS_MILE" {
-		suffix = "/mi"
+	suffix := map[string]string{
+		"MINS_KM":   "/km",
+		"MINS_MILE": "/mi",
+		"SECS_100M": "/100m",
+		"SECS_100Y": "/100y",
+	}[unit]
+	if suffix == "" {
+		return "", fmt.Errorf("unsupported absolute pace target units %q", unit)
 	}
 	formatted := formatPaceDuration(lo)
 	if ranged {
@@ -277,6 +297,9 @@ func targetBounds(target Target, ramp bool) (float64, float64, bool, error) {
 		return *target.Value, 0, false, nil
 	}
 	if target.Min != nil && target.Max != nil {
+		if *target.Min > *target.Max {
+			return 0, 0, false, fmt.Errorf("target range minimum must be less than or equal to maximum")
+		}
 		return *target.Min, *target.Max, true, nil
 	}
 	return 0, 0, false, fmt.Errorf("target requires value or min/max range")

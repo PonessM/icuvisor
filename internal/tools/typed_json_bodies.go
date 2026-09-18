@@ -5,11 +5,12 @@ import "encoding/json"
 type jsonObject = map[string]any
 
 type workoutDocSummaryRow struct {
-	Present        bool                      `json:"present"`
-	StepCount      *int                      `json:"step_count,omitempty"`
-	Name           string                    `json:"name,omitempty"`
-	TopLevelKeys   *[]string                 `json:"top_level_keys,omitempty"`
-	TargetPreviews []workoutTargetPreviewRow `json:"target_previews,omitempty"`
+	Present                  bool                             `json:"present"`
+	StepCount                *int                             `json:"step_count,omitempty"`
+	Name                     string                           `json:"name,omitempty"`
+	TopLevelKeys             *[]string                        `json:"top_level_keys,omitempty"`
+	TargetPreviews           []workoutTargetPreviewRow        `json:"target_previews,omitempty"`
+	TargetPreviewDiagnostics []workoutTargetPreviewDiagnostic `json:"target_preview_diagnostics,omitempty"`
 }
 
 type trainingPlanSummaryRow struct {

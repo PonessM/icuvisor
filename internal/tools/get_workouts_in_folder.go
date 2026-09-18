@@ -124,6 +124,9 @@ func workoutInFolderToRow(workout intervals.Workout, includeFull bool, previewCo
 	}
 	if workout.WorkoutDoc != nil {
 		row.WorkoutDocSummary = workoutDocSummary(workout.WorkoutDoc, previewContexts...)
+		if len(previewContexts) > 0 {
+			_, row.WorkoutDocSummary.TargetPreviewDiagnostics = workoutTargetPreviewsWithDiagnostics(workout.WorkoutDoc, previewContexts[0])
+		}
 		if includeFull {
 			row.WorkoutDoc = workout.WorkoutDoc
 		}

@@ -111,8 +111,8 @@ func TestGetWorkoutLibraryResolvesPercentFTPTopLevelWorkoutTargetPreview(t *test
 	t.Parallel()
 
 	client := &fakeWorkoutLibraryClient{
-		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Ride"}, FTP: 300}}}},
-		workouts:          decodeToolWorkouts(t, `{"id":1,"name":"FTP Blocks","type":"Ride","workout_doc":{"steps":[{"description":"Threshold","duration":600,"power":{"value":105,"units":"PERCENT_FTP"}}]}}`),
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Swim"}, FTP: 150}, {Types: []string{"Ride"}, FTP: 300}}}},
+		workouts:          decodeToolWorkouts(t, `{"id":1,"name":"FTP Blocks","type":"Ride","workout_doc":{"steps":[{"description":"Threshold","duration":600,"power":{"min":88,"max":94,"units":"PERCENT_FTP"}}]}}`),
 	}
 	tool := newGetWorkoutLibraryTool(client, client, "test", "UTC", false)
 
@@ -130,7 +130,7 @@ func TestGetWorkoutLibraryResolvesPercentFTPTopLevelWorkoutTargetPreview(t *test
 		t.Fatalf("target_previews = %#v, want one resolved FTP preview", previews)
 	}
 	preview := previews[0].(map[string]any)
-	if preview["target"] != "105% FTP" || preview["preview"] != "315 W" || preview["basis"] != "ftp 300 W" {
+	if preview["target"] != "88-94% FTP" || preview["preview"] != "264-282 W" || preview["basis"] != "ftp 300 W" {
 		t.Fatalf("preview = %#v, want compact FTP watts resolution", preview)
 	}
 	if _, ok := row["workout_doc"]; ok {
@@ -269,9 +269,12 @@ func TestGetWorkoutsInFolderResolvesYardSwimPaceTargetPreviews(t *testing.T) {
 	t.Parallel()
 
 	client := &fakeWorkoutLibraryClient{
-		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Swim"}, ThresholdPace: 1.016, PaceUnits: "SECS_100Y"}}}},
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: []intervals.SportSettings{
+			{Types: []string{"Run"}, ThresholdPace: 4, PaceUnits: "MINS_KM"},
+			{Types: []string{"Swim"}, ThresholdPace: 1.016, PaceUnits: "SECS_100Y"},
+		}}},
 		workouts: decodeToolWorkouts(t,
-			`{"id":3,"name":"Pool Targets","type":"Swim","folder_id":20,"workout_doc":{"steps":[{"description":"Cruise","duration":600,"pace":{"value":95,"units":"PERCENT_THRESHOLD"}}]}}`,
+			`{"id":3,"name":"Pool Targets","type":"Swim","folder_id":20,"workout_doc":{"steps":[{"description":"Cruise","duration":600,"pace":{"min":95,"max":100,"units":"PERCENT_THRESHOLD"}}]}}`,
 		),
 	}
 	tool := newGetWorkoutsInFolderTool(client, client, "test", "UTC", false)
@@ -286,8 +289,67 @@ func TestGetWorkoutsInFolderResolvesYardSwimPaceTargetPreviews(t *testing.T) {
 		t.Fatalf("target_previews = %#v, want one pace preview", previews)
 	}
 	pace := previews[0].(map[string]any)
-	if pace["family"] != "pace" || pace["target"] != "95% Pace" || pace["preview"] != "1:35/100y" || pace["basis"] != "threshold pace 1:30/100y" {
+	if pace["family"] != "pace" || pace["target"] != "95-100% Pace" || pace["preview"] != "1:35/100y-1:30/100y" || pace["basis"] != "threshold pace 1:30/100y" {
 		t.Fatalf("pace preview = %#v, want threshold pace resolved as /100y", pace)
+	}
+}
+
+func TestWorkoutTargetPreviewsNeverUseAnUnrelatedSoleSportSetting(t *testing.T) {
+	t.Parallel()
+
+	profile := intervals.AthleteWithSportSettings{SportSettings: []intervals.SportSettings{{Types: []string{"Run"}, ThresholdPace: 4, PaceUnits: "MINS_KM"}}}
+	ctx := workoutTargetPreviewContext{Profile: &profile, UnitSystem: response.UnitSystemMetric, Sport: "Swim"}
+	workoutDoc := map[string]any{"steps": []any{map[string]any{
+		"description": "CSS",
+		"duration":    float64(600),
+		"pace":        map[string]any{"value": float64(100), "units": "PERCENT_THRESHOLD"},
+	}}}
+
+	if got := workoutTargetPreviews(workoutDoc, ctx); len(got) != 0 {
+		t.Fatalf("workoutTargetPreviews() = %#v, want no preview from unrelated Run threshold", got)
+	}
+}
+
+func TestGetWorkoutsInFolderReportsMissingSportAndThresholdContext(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		settings []intervals.SportSettings
+		wantCode string
+	}{
+		{name: "unrelated sole setting", settings: []intervals.SportSettings{{Types: []string{"Run"}, ThresholdPace: 4, PaceUnits: "MINS_KM"}}, wantCode: "missing_sport_settings"},
+		{name: "swim threshold absent", settings: []intervals.SportSettings{{Types: []string{"Swim"}, PaceUnits: "SECS_100M"}}, wantCode: "missing_pace_threshold"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &fakeWorkoutLibraryClient{
+				fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC", SportSettings: tc.settings}},
+				workouts: decodeToolWorkouts(t,
+					`{"id":4,"name":"CSS","type":"Swim","folder_id":20,"workout_doc":{"steps":[{"description":"CSS","distance":400,"pace":{"min":95,"max":100,"units":"PERCENT_THRESHOLD"}}]}}`,
+				),
+			}
+			tool := newGetWorkoutsInFolderTool(client, client, "test", "UTC", false)
+
+			result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"folder_id":"20"}`)})
+			if err != nil {
+				t.Fatalf("Handler() error = %v", err)
+			}
+			summary := resultMap(t, result)["workouts"].([]any)[0].(map[string]any)["workout_doc_summary"].(map[string]any)
+			assertKeyAbsent(t, summary, "target_previews")
+			diagnostics, ok := summary["target_preview_diagnostics"].([]any)
+			if !ok || len(diagnostics) != 1 {
+				t.Fatalf("target_preview_diagnostics = %#v, want one explicit diagnostic", summary["target_preview_diagnostics"])
+			}
+			diagnostic := diagnostics[0].(map[string]any)
+			if diagnostic["code"] != tc.wantCode || diagnostic["family"] != "pace" || diagnostic["path"] != "1" {
+				t.Fatalf("diagnostic = %#v, want %s pace diagnostic at path 1", diagnostic, tc.wantCode)
+			}
+			if message, _ := diagnostic["message"].(string); !strings.Contains(message, "unavailable") {
+				t.Fatalf("diagnostic message = %#v, want explicit unavailable wording", diagnostic["message"])
+			}
+		})
 	}
 }
 

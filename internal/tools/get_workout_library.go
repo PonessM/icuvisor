@@ -181,6 +181,9 @@ func workoutToRow(workout intervals.Workout, includeFull bool, previewContexts .
 	row := workoutTemplateRow{WorkoutID: workout.ID, Name: stringValue(workout.Name), Sport: stringValue(workout.Type), FolderID: workoutFolderID(workout), TrainingLoad: intValue(workout.TrainingLoad), MovingTimeSeconds: intValue(workout.MovingTime), DistanceMeters: workout.Distance, Target: stringValue(workout.Target), Targets: workout.Targets, Tags: workout.Tags, Indoor: workout.Indoor, Description: stringValue(workout.Description)}
 	if workout.WorkoutDoc != nil {
 		row.WorkoutDocSummary = workoutDocSummary(workout.WorkoutDoc, previewContexts...)
+		if len(previewContexts) > 0 {
+			_, row.WorkoutDocSummary.TargetPreviewDiagnostics = workoutTargetPreviewsWithDiagnostics(workout.WorkoutDoc, previewContexts[0])
+		}
 	}
 	if includeFull {
 		row.Full = rawJSONMap(workout.Raw)

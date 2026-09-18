@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened structured-workout round trips across sports: absolute swim pace targets now preserve seconds-per-100-metre/yard ranges, target previews require exact sport settings and report missing FTP/CSS/zone context, conflicting primary targets and invalid zone/range boundaries fail explicitly, and workout-library writes enumerate upstream lossy fields.
+
 ## [1.6.4] - 2026-08-30
 
 ### Added

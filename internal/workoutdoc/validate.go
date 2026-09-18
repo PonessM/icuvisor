@@ -247,9 +247,9 @@ func collectStepDiagnostics(step Step, topIndex *int, parentReps *int, result *V
 		primaries++
 	}
 	if primaries > 1 {
-		result.Warnings = append(result.Warnings, Diagnostic{
-			Code:      "MIXED_PRIMARY_TARGETS",
-			Message:   "step has more than one of power, heart rate, or pace as a primary target; intervals.icu supports only one",
+		result.Errors = append(result.Errors, Diagnostic{
+			Code:      "CONFLICTING_PRIMARY_TARGETS",
+			Message:   "step has conflicting power, heart rate, or pace targets; choose one primary target or split the prescriptions into separate steps",
 			StepIndex: topIndex,
 		})
 	}

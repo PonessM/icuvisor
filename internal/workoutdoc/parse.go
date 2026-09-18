@@ -16,7 +16,7 @@ var (
 	bpmTokenRE      = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?bpm$`)
 	rpmTokenRE      = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?rpm$`)
 	zoneTokenRE     = regexp.MustCompile(`^Z([0-9]+)(?:-Z([0-9]+))?$`)
-	paceTokenRE     = regexp.MustCompile(`^([0-9]+):([0-9]{2})(?:-([0-9]+):([0-9]{2}))?/(km|mi)$`)
+	paceTokenRE     = regexp.MustCompile(`^([0-9]+):([0-9]{2})(?:-([0-9]+):([0-9]{2}))?/(km|mi|100m|100y)$`)
 )
 
 // Parse reads the canonical Intervals.icu workout-description DSL emitted by Serialize.
@@ -266,9 +266,14 @@ func parseAbsolutePaceTarget(token string) (*Target, bool) {
 		return nil, false
 	}
 	lo := parsePaceDuration(match[1], match[2])
-	unit := "MINS_KM"
-	if match[5] == "mi" {
-		unit = "MINS_MILE"
+	unit := map[string]string{
+		"km":   "MINS_KM",
+		"mi":   "MINS_MILE",
+		"100m": "SECS_100M",
+		"100y": "SECS_100Y",
+	}[match[5]]
+	if unit == "" {
+		return nil, false
 	}
 	if match[3] == "" {
 		return &Target{Value: &lo, Units: unit}, true

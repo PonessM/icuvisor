@@ -54,6 +54,7 @@ type updateWorkoutMeta struct {
 	FieldsUpdated                 []string `json:"fields_updated"`
 	WorkoutDocUploaded            string   `json:"workout_doc_uploaded,omitempty"`
 	WorkoutDocWarning             string   `json:"workout_doc_warning,omitempty"`
+	LossyFields                   []string `json:"lossy_fields,omitempty"`
 	DescriptionOnlyWorkoutWarning string   `json:"description_only_workout_warning,omitempty"`
 	DefaultPayloadScope           string   `json:"default_payload_scope"`
 }
@@ -168,7 +169,7 @@ func updateWorkoutParams(args updateWorkoutRequest, options workoutdoc.Serialize
 }
 
 func shapeUpdateWorkoutResponse(workout intervals.Workout, args updateWorkoutRequest, workoutDocUploaded string, profile intervals.AthleteWithSportSettings, unitSystem response.UnitSystem) updateWorkoutResponse {
-	return updateWorkoutResponse{Workout: workoutToRow(workout, false, workoutPreviewContextForWorkout(workout, profile, unitSystem)), Meta: updateWorkoutMeta{Operation: "update", SourceEndpoint: workoutLibraryWorkoutsEndpoint, WorkoutID: args.WorkoutID, FieldsUpdated: updateWorkoutFieldsUpdated(args), WorkoutDocUploaded: workoutDocUploaded, WorkoutDocWarning: workoutDocRenderWarning(args.WorkoutDoc, workout.WorkoutDoc), DescriptionOnlyWorkoutWarning: updateWorkoutDescriptionOnlyWorkoutWarning(args), DefaultPayloadScope: "same terse workout row shape used by get_workout_library/get_workouts_in_folder; raw workout_doc remains summarized"}}
+	return updateWorkoutResponse{Workout: workoutToRow(workout, false, workoutPreviewContextForWorkout(workout, profile, unitSystem)), Meta: updateWorkoutMeta{Operation: "update", SourceEndpoint: workoutLibraryWorkoutsEndpoint, WorkoutID: args.WorkoutID, FieldsUpdated: updateWorkoutFieldsUpdated(args), WorkoutDocUploaded: workoutDocUploaded, WorkoutDocWarning: workoutDocRenderWarning(args.WorkoutDoc, workout.WorkoutDoc), LossyFields: workoutDocLossyFields(args.WorkoutDoc, workout.WorkoutDoc), DescriptionOnlyWorkoutWarning: updateWorkoutDescriptionOnlyWorkoutWarning(args), DefaultPayloadScope: "same terse workout row shape used by get_workout_library/get_workouts_in_folder; raw workout_doc remains summarized"}}
 }
 
 func updateWorkoutDescriptionOnlyWorkoutWarning(args updateWorkoutRequest) string {

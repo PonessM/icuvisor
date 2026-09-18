@@ -16,6 +16,11 @@ const workoutDocUnrenderedWarning = "intervals.icu saved this but did not parse 
 
 const workoutDocPartialFidelityWarning = "intervals.icu saved this and parsed structured steps, but the returned workout_doc differs from the uploaded workout_doc; it may have partially parsed the DSL and dropped, reordered, or changed some structured fields."
 
+type upstreamWorkoutStep struct {
+	value map[string]any
+	used  bool
+}
+
 // workoutDocRenderWarning returns a warning when a structured workout_doc with steps was
 // uploaded but the upstream response shows it was not parsed, or parsed only partially.
 func workoutDocRenderWarning(uploaded *workoutdoc.WorkoutDoc, upstreamDoc any) string {
@@ -29,6 +34,227 @@ func workoutDocRenderWarning(uploaded *workoutdoc.WorkoutDoc, upstreamDoc any) s
 		return workoutDocPartialFidelityWarning
 	}
 	return ""
+}
+
+func workoutDocLossyFields(uploaded *workoutdoc.WorkoutDoc, upstreamDoc any) []string {
+	if uploaded == nil || len(uploaded.Steps) == 0 {
+		return nil
+	}
+	upstream := flattenUpstreamWorkoutSteps(upstreamDoc)
+	if len(upstream) == 0 {
+		return []string{"workout_doc.steps"}
+	}
+	lossy := make([]string, 0)
+	for index, step := range uploaded.Steps {
+		collectWorkoutStepLossiness(step, fmt.Sprintf("steps[%d]", index), upstream, &lossy)
+	}
+	return uniqueWorkoutLossyFields(lossy)
+}
+
+func flattenUpstreamWorkoutSteps(value any) []*upstreamWorkoutStep {
+	steps, ok := workoutDocSteps(value)
+	if !ok {
+		return nil
+	}
+	out := make([]*upstreamWorkoutStep, 0, len(steps))
+	var walk func([]any)
+	walk = func(items []any) {
+		for _, item := range items {
+			step, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			out = append(out, &upstreamWorkoutStep{value: step})
+			if children, ok := step["steps"].([]any); ok {
+				walk(children)
+			}
+		}
+	}
+	walk(steps)
+	return out
+}
+
+func collectWorkoutStepLossiness(uploaded workoutdoc.Step, path string, upstream []*upstreamWorkoutStep, lossy *[]string) {
+	match := matchUpstreamWorkoutStep(uploaded, upstream)
+	if match == nil {
+		if uploaded.Reps > 0 || len(uploaded.Steps) > 0 {
+			*lossy = append(*lossy, path+".reps", path+".steps")
+			for index, child := range uploaded.Steps {
+				collectWorkoutStepLossiness(child, fmt.Sprintf("%s.steps[%d]", path, index), upstream, lossy)
+			}
+			return
+		}
+		*lossy = append(*lossy, path)
+		return
+	}
+	if uploaded.Reps > 0 || len(uploaded.Steps) > 0 {
+		if int(math.Round(anyFloat(match["reps"]))) != uploaded.Reps {
+			*lossy = append(*lossy, path+".reps")
+		}
+		if _, ok := match["steps"].([]any); !ok {
+			*lossy = append(*lossy, path+".steps")
+		}
+		for index, child := range uploaded.Steps {
+			collectWorkoutStepLossiness(child, fmt.Sprintf("%s.steps[%d]", path, index), upstream, lossy)
+		}
+		return
+	}
+	if uploaded.Duration > 0 && int(math.Round(anyFloat(match["duration"]))) != uploaded.Duration {
+		*lossy = append(*lossy, path+".duration")
+	}
+	if uploaded.Distance != nil {
+		if distance, ok := optionalFloat(firstPresent(match, "distance")); !ok || math.Abs(distance-uploadedDistanceMeters(uploaded.Distance)) > 0.01 {
+			*lossy = append(*lossy, path+".distance")
+		}
+	}
+	for _, target := range []struct {
+		family   string
+		uploaded *workoutdoc.Target
+	}{
+		{family: "power", uploaded: uploaded.Power},
+		{family: "hr", uploaded: uploaded.HR},
+		{family: "pace", uploaded: uploaded.Pace},
+		{family: "rpe", uploaded: uploaded.RPE},
+		{family: "cadence", uploaded: uploaded.Cadence},
+	} {
+		if target.uploaded == nil {
+			continue
+		}
+		upstreamTarget, ok := match[target.family].(map[string]any)
+		if !ok || !targetsPreserveMeaning(target.family, *target.uploaded, upstreamTarget) {
+			*lossy = append(*lossy, path+"."+target.family)
+		}
+	}
+	if uploaded.Freeride && !anyBool(match["freeride"]) {
+		*lossy = append(*lossy, path+".freeride")
+	}
+	if uploaded.PressLap && !anyBool(firstPresent(match, "press_lap", "until_lap_press")) {
+		*lossy = append(*lossy, path+".press_lap")
+	}
+	if uploaded.Ramp && !anyBool(match["ramp"]) {
+		*lossy = append(*lossy, path+".ramp")
+	}
+}
+
+func matchUpstreamWorkoutStep(uploaded workoutdoc.Step, upstream []*upstreamWorkoutStep) map[string]any {
+	wantText := signatureText(uploaded.Description)
+	wantRepeat := uploaded.Reps > 0 || len(uploaded.Steps) > 0
+	for _, candidate := range upstream {
+		if candidate.used {
+			continue
+		}
+		gotText := signatureText(anyString(firstPresent(candidate.value, "text", "description")))
+		_, gotRepeat := candidate.value["steps"].([]any)
+		if gotText == wantText && (wantText != "" || wantRepeat == gotRepeat) {
+			candidate.used = true
+			return candidate.value
+		}
+	}
+	return nil
+}
+
+func targetsPreserveMeaning(family string, uploaded workoutdoc.Target, upstream map[string]any) bool {
+	uploadedValues, uploadedOK := workoutTargetValues(uploaded.Value, uploaded.Min, uploaded.Max, uploaded.Start, uploaded.End)
+	upstreamValues, upstreamOK := workoutTargetValuesFromMap(upstream)
+	if !uploadedOK || !upstreamOK || len(uploadedValues) != len(upstreamValues) {
+		return false
+	}
+	for index := range uploadedValues {
+		if math.Abs(uploadedValues[index]-upstreamValues[index]) > 0.000001 {
+			return false
+		}
+	}
+	return canonicalWorkoutTargetUnit(family, uploaded.Units) == canonicalWorkoutTargetUnit(family, anyString(upstream["units"]))
+}
+
+func workoutTargetValues(value, minValue, maxValue, start, end *float64) ([]float64, bool) {
+	if value != nil {
+		return []float64{*value}, true
+	}
+	if minValue != nil && maxValue != nil {
+		return []float64{*minValue, *maxValue}, true
+	}
+	if start != nil && end != nil {
+		return []float64{*start, *end}, true
+	}
+	return nil, false
+}
+
+func workoutTargetValuesFromMap(target map[string]any) ([]float64, bool) {
+	if value, ok := optionalFloat(target["value"]); ok {
+		return []float64{value}, true
+	}
+	for _, keys := range [][2]string{{"min", "max"}, {"start", "end"}} {
+		lo, okLo := optionalFloat(target[keys[0]])
+		hi, okHi := optionalFloat(target[keys[1]])
+		if okLo && okHi {
+			return []float64{lo, hi}, true
+		}
+	}
+	return nil, false
+}
+
+func canonicalWorkoutTargetUnit(family string, value string) string {
+	unit := strings.ToUpper(strings.TrimSpace(value))
+	switch unit {
+	case "":
+		switch family {
+		case "power":
+			return "PERCENT_FTP"
+		case "pace":
+			return "PERCENT_THRESHOLD"
+		case "rpe":
+			return "RPE"
+		case "cadence":
+			return "RPM"
+		}
+		return ""
+	case "PERCENT_FTP", "%FTP":
+		return "PERCENT_FTP"
+	case "WATTS", "WATT", "W":
+		return "WATTS"
+	case "PERCENT_LTHR", "%LTHR", "LTHR":
+		return "PERCENT_LTHR"
+	case "PERCENT_HR", "PERCENT_MAX_HR", "%HR", "HR":
+		return "PERCENT_HR"
+	case "PERCENT_THRESHOLD", "PERCENT_THRESHOLD_PACE", "PERCENT_PACE", "%PACE":
+		return "PERCENT_THRESHOLD"
+	case "ZONE":
+		return strings.ToUpper(family) + "_ZONE"
+	case "POWER_ZONE":
+		return "POWER_ZONE"
+	case "HR_ZONE":
+		return "HR_ZONE"
+	case "PACE_ZONE":
+		return "PACE_ZONE"
+	case "MINS_KM", "SECS/KM":
+		return "MINS_KM"
+	case "MINS_MILE", "SECS/MI":
+		return "MINS_MILE"
+	case "SECS_100M", "SECS/100M":
+		return "SECS_100M"
+	case "SECS_100Y", "SECS/100Y":
+		return "SECS_100Y"
+	case "RPM", "CADENCE":
+		return "RPM"
+	case "RPE":
+		return "RPE"
+	default:
+		return unit
+	}
+}
+
+func uniqueWorkoutLossyFields(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 // workoutDocHasSteps reports whether an upstream workout_doc payload parsed into at least one step.
