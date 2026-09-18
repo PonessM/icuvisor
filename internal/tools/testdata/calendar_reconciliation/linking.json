@@ -1,0 +1,6 @@
+{
+  "event": {"id":1001,"category":"WORKOUT","type":"Run","name":"Planned run","start_date_local":"2026-05-20T07:00:00"},
+  "already_linked_activity": {"id":"activity-1","type":"Run","start_date_local":"2026-05-20T07:02:00","paired_event_id":1001},
+  "different_link_activity": {"id":"activity-1","type":"Run","start_date_local":"2026-05-20T07:02:00","paired_event_id":999},
+  "unlinked_activity": {"id":"activity-1","type":"Run","start_date_local":"2026-05-20T07:02:00"}
+}

@@ -11,7 +11,7 @@ import (
 
 const (
 	linkActivityToEventName                    = "link_activity_to_event"
-	linkActivityToEventDescription             = "Manually pair one completed activity with one planned calendar event when intervals.icu auto-pairing misses (forum #97). This is a non-destructive write: it sets the activity's paired_event_id and does not delete activities or events."
+	linkActivityToEventDescription             = "Manually pair one completed activity with one planned calendar event when intervals.icu auto-pairing misses (forum #97). This is a non-destructive, retry-safe write: an identical existing link is returned without a second write, a different existing link is rejected instead of overwritten, and a new link is reported successful only after the returned payload or a bounded read verifies paired_event_id."
 	invalidLinkActivityToEventArgumentsMessage = "invalid link_activity_to_event arguments; provide non-empty activity_id and numeric event_id"
 	linkActivityToEventMessage                 = "could not link activity to event; check intervals.icu credentials, activity ID, and event ID"
 )
@@ -36,8 +36,9 @@ type linkActivityToEventResponse struct {
 }
 
 type linkActivityToEventMeta struct {
-	Warnings    []linkActivityToEventWarning `json:"warnings,omitempty"`
-	IncludeFull bool                         `json:"include_full"`
+	Warnings           []linkActivityToEventWarning `json:"warnings,omitempty"`
+	ConfirmationStatus string                       `json:"confirmation_status"`
+	IncludeFull        bool                         `json:"include_full"`
 }
 
 type linkActivityToEventWarning struct {
@@ -61,6 +62,30 @@ func linkActivityToEventHandler(client ActivityEventLinkClient, activityClient A
 		if client == nil {
 			return Result{}, NewUserError(linkActivityToEventMessage, errors.New("missing activity/event link client"))
 		}
+		if activityClient != nil {
+			current, err := activityClient.GetActivity(ctx, args.ActivityID)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return Result{}, err
+				}
+				return Result{}, NewUserError(linkActivityToEventMessage, err)
+			}
+			if currentEventID := activityPairedEventID(current); currentEventID != "" {
+				if currentEventID != args.EventID {
+					message := "activity is already linked to event " + currentEventID + "; unlink it before linking event " + args.EventID
+					return Result{}, NewUserError(message, errors.New("activity has a different paired_event_id"))
+				}
+				warnings, err := linkActivityToEventWarnings(ctx, activityClient, eventClient, args.ActivityID, args.EventID)
+				if err != nil {
+					return Result{}, err
+				}
+				payload := linkActivityToEventResponse{ActivityID: args.ActivityID, EventID: args.EventID, Status: "already_linked", Meta: linkActivityToEventMeta{Warnings: warnings, ConfirmationStatus: "verified_existing_link", IncludeFull: args.IncludeFull}}
+				if args.IncludeFull {
+					payload.Full = current.Raw
+				}
+				return encodeShaped(payload, args.IncludeFull, nil, version, debugMetadata, linkActivityToEventName, "", shapeCfg)
+			}
+		}
 		linked, err := client.LinkActivityToEvent(ctx, intervals.LinkActivityToEventParams{ActivityID: args.ActivityID, EventID: args.EventID})
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -68,11 +93,29 @@ func linkActivityToEventHandler(client ActivityEventLinkClient, activityClient A
 			}
 			return Result{}, NewUserError(linkActivityToEventMessage, err)
 		}
+		confirmationStatus := "write_returned_verified_link"
+		if activityPairedEventID(linked) != args.EventID {
+			if activityClient == nil {
+				return Result{}, NewUserError(linkActivityToEventMessage, errors.New("link response did not confirm paired_event_id"))
+			}
+			verified, verifyErr := activityClient.GetActivity(ctx, args.ActivityID)
+			if verifyErr != nil {
+				if errors.Is(verifyErr, context.Canceled) || errors.Is(verifyErr, context.DeadlineExceeded) {
+					return Result{}, verifyErr
+				}
+				return Result{}, NewUserError(linkActivityToEventMessage, verifyErr)
+			}
+			if activityPairedEventID(verified) != args.EventID {
+				return Result{}, NewUserError(linkActivityToEventMessage, errors.New("read-after-write did not confirm paired_event_id"))
+			}
+			linked = verified
+			confirmationStatus = "verified_after_write_read"
+		}
 		warnings, err := linkActivityToEventWarnings(ctx, activityClient, eventClient, args.ActivityID, args.EventID)
 		if err != nil {
 			return Result{}, err
 		}
-		payload := linkActivityToEventResponse{ActivityID: args.ActivityID, EventID: args.EventID, Status: "linked", Meta: linkActivityToEventMeta{Warnings: warnings, IncludeFull: args.IncludeFull}}
+		payload := linkActivityToEventResponse{ActivityID: args.ActivityID, EventID: args.EventID, Status: "linked", Meta: linkActivityToEventMeta{Warnings: warnings, ConfirmationStatus: confirmationStatus, IncludeFull: args.IncludeFull}}
 		if args.IncludeFull {
 			payload.Full = linked.Raw
 		}
@@ -151,5 +194,5 @@ func linkActivityToEventInputSchema() map[string]any {
 }
 
 func linkActivityToEventOutputSchema() map[string]any {
-	return map[string]any{"type": "object", "additionalProperties": true, "description": "Non-destructive activity/event link confirmation with activity_id, event_id, status, and _meta.warnings when the activity/event dates differ."}
+	return map[string]any{"type": "object", "additionalProperties": true, "description": "Non-destructive activity/event link confirmation with activity_id, event_id, status, _meta.confirmation_status, and _meta.warnings when the activity/event dates differ. Existing identical links return already_linked without a second write; a different existing pairing is rejected before write."}
 }

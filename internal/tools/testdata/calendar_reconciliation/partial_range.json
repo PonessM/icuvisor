@@ -1,0 +1,16 @@
+{
+  "request": {
+    "start_date": "2026-08-10",
+    "end_date": "2026-08-11",
+    "category": "HOLIDAY",
+    "description": "Travel block"
+  },
+  "first_created_event": {
+    "id": "holiday-day-1",
+    "category": "HOLIDAY",
+    "type": "Unavailable",
+    "name": "Holiday",
+    "description": "Travel block",
+    "start_date_local": "2026-08-10T00:00:00"
+  }
+}

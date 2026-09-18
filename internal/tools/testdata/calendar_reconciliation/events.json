@@ -1,0 +1,13 @@
+{
+  "same_day_distinct": [
+    {"id":"session-am","category":"WORKOUT","type":"Run","name":"AM aerobic run","start_date_local":"2026-05-25T07:00:00","time_target":2700},
+    {"id":"session-pm","category":"WORKOUT","type":"Ride","name":"PM endurance ride","start_date_local":"2026-05-25T18:00:00","time_target":5400}
+  ],
+  "occupied_reschedule": [
+    {"id":"occupied-ride","category":"WORKOUT","type":"Ride","name":"Existing endurance ride","start_date_local":"2026-06-12T18:00:00","time_target":3600},
+    {"id":"occupied-note","category":"NOTE","name":"Travel reminder","start_date_local":"2026-06-12T00:00:00"}
+  ],
+  "multi_day_race": [
+    {"id":"stage-race","category":"RACE_A","type":"Ride","name":"Three-day stage race","start_date_local":"2026-07-10T08:00:00","end_date_local":"2026-07-12T16:00:00","load_target":420}
+  ]
+}

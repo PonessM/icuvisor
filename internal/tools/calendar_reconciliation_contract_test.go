@@ -1,0 +1,350 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/ricardocabral/icuvisor/internal/intervals"
+)
+
+type calendarEventsFixture struct {
+	SameDayDistinct    []intervals.Event `json:"same_day_distinct"`
+	OccupiedReschedule []intervals.Event `json:"occupied_reschedule"`
+	MultiDayRace       []intervals.Event `json:"multi_day_race"`
+}
+
+type calendarComplianceFixture struct {
+	Events     []intervals.Event    `json:"events"`
+	Activities []intervals.Activity `json:"activities"`
+}
+
+type calendarTimezoneFixture struct {
+	Name             string          `json:"name"`
+	Timezone         string          `json:"timezone"`
+	Oldest           string          `json:"oldest"`
+	Newest           string          `json:"newest"`
+	Event            intervals.Event `json:"event"`
+	WantUpdatedLocal string          `json:"want_updated_local"`
+}
+
+type interruptedCreateFixture struct {
+	Request        json.RawMessage `json:"request"`
+	CommittedEvent intervals.Event `json:"committed_event"`
+}
+
+type calendarLinkingFixture struct {
+	Event                 intervals.Event    `json:"event"`
+	AlreadyLinkedActivity intervals.Activity `json:"already_linked_activity"`
+	DifferentLinkActivity intervals.Activity `json:"different_link_activity"`
+	UnlinkedActivity      intervals.Activity `json:"unlinked_activity"`
+}
+
+type partialRangeFixture struct {
+	Request           json.RawMessage `json:"request"`
+	FirstCreatedEvent intervals.Event `json:"first_created_event"`
+}
+
+type interruptedEventWriter struct {
+	fakeProfileClient
+	listResults [][]intervals.Event
+	writeCalls  []intervals.WriteEventParams
+	listCalls   []intervals.ListEventsParams
+}
+
+func (f *interruptedEventWriter) AddOrUpdateEvent(_ context.Context, params intervals.WriteEventParams) (intervals.Event, error) {
+	f.writeCalls = append(f.writeCalls, params)
+	return intervals.Event{}, errors.New("connection reset after request body")
+}
+
+func (f *interruptedEventWriter) ListEvents(_ context.Context, params intervals.ListEventsParams) ([]intervals.Event, error) {
+	f.listCalls = append(f.listCalls, params)
+	if len(f.listResults) == 0 {
+		return nil, nil
+	}
+	result := f.listResults[0]
+	f.listResults = f.listResults[1:]
+	return append([]intervals.Event(nil), result...), nil
+}
+
+func TestCalendarReconciliationSameDaySessionsAndMultiDayRaceStayDistinct(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarEventsFixture](t, "events.json")
+	client := &fakeEventsTrainingPlanClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		events:            append(append([]intervals.Event(nil), fixture.SameDayDistinct...), fixture.MultiDayRace...),
+	}
+	tool := newGetEventsTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"oldest":"2026-05-25","newest":"2026-07-12","limit":10}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	rows := rowsByEventID(resultMap(t, result)["events"].([]any))
+	if len(rows) != 3 {
+		t.Fatalf("events = %#v, want two distinct sessions and one race row", rows)
+	}
+	if rows["session-am"]["name"] != "AM aerobic run" || rows["session-pm"]["name"] != "PM endurance ride" {
+		t.Fatalf("same-day rows = %#v / %#v, want separately identified sessions", rows["session-am"], rows["session-pm"])
+	}
+	race := rows["stage-race"]
+	if race["start_date_local"] != "2026-07-10T08:00:00" || race["end_date_local"] != "2026-07-12T16:00:00" || race["load_target"] != float64(420) {
+		t.Fatalf("race = %#v, want one multi-day race with one load target", race)
+	}
+}
+
+func TestCalendarReconciliationRescheduleOntoOccupiedDateReportsConflicts(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarEventsFixture](t, "events.json")
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		events:            fixture.OccupiedReschedule,
+		event:             decodeToolEvents(t, `{"id":"moving-run","category":"WORKOUT","type":"Run","name":"Rescheduled intervals","start_date_local":"2026-06-12T00:00:00","time_target":3000}`)[0],
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"event_id":"moving-run","date":"2026-06-12","category":"WORKOUT","type":"Run","name":"Rescheduled intervals","moving_time_seconds":3000}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	if len(client.calls) != 1 || client.calls[0].EventID != "moving-run" {
+		t.Fatalf("write calls = %#v, want only explicit event_id updated", client.calls)
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	conflicts, ok := meta["same_day_conflicts"].([]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want same_day_conflicts array", meta)
+	}
+	if len(conflicts) != 2 || meta["duplicate_warning"] != "Target date already contains other events; only the requested event_id was updated. Verify the reschedule did not create an unintended overlap." {
+		t.Fatalf("meta = %#v, want two occupied-date conflicts and actionable warning", meta)
+	}
+}
+
+func TestCalendarReconciliationLinkRetrySkipsVerifiedExistingPair(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarLinkingFixture](t, "linking.json")
+	client := &fakeLinkActivityToEventClient{activity: fixture.AlreadyLinkedActivity, event: fixture.Event, linked: fixture.AlreadyLinkedActivity}
+	tool := newLinkActivityToEventTool(client, client, client, "test", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-1","event_id":"1001"}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("link calls = %#v, want retry skipped before a second write", client.calls)
+	}
+	out := resultMap(t, result)
+	if out["status"] != "already_linked" {
+		t.Fatalf("status = %#v, want already_linked", out["status"])
+	}
+	meta := out["_meta"].(map[string]any)
+	if meta["confirmation_status"] != "verified_existing_link" {
+		t.Fatalf("meta = %#v, want verified existing-link confirmation", meta)
+	}
+}
+
+func TestCalendarReconciliationLinkRefusesToOverwriteDifferentPair(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarLinkingFixture](t, "linking.json")
+	client := &fakeLinkActivityToEventClient{activity: fixture.DifferentLinkActivity, event: fixture.Event, linked: fixture.DifferentLinkActivity}
+	tool := newLinkActivityToEventTool(client, client, client, "test", false)
+
+	_, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-1","event_id":"1001"}`)})
+	if err == nil {
+		t.Fatal("Handler() error = nil, want existing-pair conflict")
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("link calls = %#v, want conflict before write", client.calls)
+	}
+	message, ok := PublicErrorMessage(err)
+	if !ok || message != "activity is already linked to event 999; unlink it before linking event 1001" {
+		t.Fatalf("PublicErrorMessage(%v) = %q/%v, want actionable existing-pair conflict", err, message, ok)
+	}
+}
+
+func TestCalendarReconciliationLinkDoesNotReportUnverifiedWriteAsSuccess(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarLinkingFixture](t, "linking.json")
+	client := &fakeLinkActivityToEventClient{activity: fixture.UnlinkedActivity, event: fixture.Event, linked: fixture.UnlinkedActivity}
+	tool := newLinkActivityToEventTool(client, client, client, "test", false)
+
+	_, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-1","event_id":"1001"}`)})
+	if err == nil {
+		t.Fatal("Handler() error = nil, want unverified link write to remain an error")
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("link calls = %#v, want one attempted write", client.calls)
+	}
+	message, ok := PublicErrorMessage(err)
+	if !ok || message != linkActivityToEventMessage {
+		t.Fatalf("PublicErrorMessage(%v) = %q/%v, want terse link guidance", err, message, ok)
+	}
+}
+
+func TestCalendarReconciliationLinkedCompletionAndProviderDuplicateCountOnce(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[calendarComplianceFixture](t, "compliance.json")
+	client := newFakeComputeClient()
+	client.events = fixture.Events
+	client.activities = fixture.Activities
+	tool := newComputeComplianceRateToolWithClock(client, client, client, client, "test", "UTC", false, fixedTodayClock())
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"start_date":"2026-05-20","end_date":"2026-05-20","target_metric":"time","include_full":true}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	out := resultMap(t, result)
+	summary := out["result"].(map[string]any)
+	if summary["scheduled_count"] != float64(2) || summary["completed_count"] != float64(2) || summary["completed_linked_count"] != float64(2) || summary["delta_sample_count"] != float64(2) {
+		t.Fatalf("result = %#v, want two linked sessions counted once despite provider duplicate", summary)
+	}
+	rows := rowsByEventID(out["series"].([]any))
+	if rows["planned-strength"]["paired_activity_id"] != "strength-direct" || rows["planned-ride"]["paired_activity_id"] != "ride-direct" {
+		t.Fatalf("rows = %#v, want explicit links to win over provider duplicate", rows)
+	}
+}
+
+func TestCalendarReconciliationTimezoneOffsetsAndDST(t *testing.T) {
+	t.Parallel()
+
+	fixtures := readCalendarFixture[[]calendarTimezoneFixture](t, "timezones.json")
+	for _, fixture := range fixtures {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			t.Parallel()
+			client := &fakeEventsTrainingPlanClient{
+				fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: fixture.Timezone}},
+				events:            []intervals.Event{fixture.Event},
+			}
+			tool := newGetEventsTool(client, client, "test", "UTC", false)
+			args := json.RawMessage(`{"oldest":"` + fixture.Oldest + `","newest":"` + fixture.Newest + `","limit":10}`)
+
+			result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: args})
+			if err != nil {
+				t.Fatalf("Handler() error = %v", err)
+			}
+			row := resultMap(t, result)["events"].([]any)[0].(map[string]any)
+			if row["updated_local"] != fixture.WantUpdatedLocal {
+				t.Fatalf("updated_local = %#v, want %q", row["updated_local"], fixture.WantUpdatedLocal)
+			}
+			meta := resultMap(t, result)["_meta"].(map[string]any)
+			if meta["timezone"] != fixture.Timezone {
+				t.Fatalf("timezone = %#v, want %q", meta["timezone"], fixture.Timezone)
+			}
+		})
+	}
+}
+
+func TestCalendarReconciliationInterruptedCreateRequiresReadAfterWriteVerification(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[interruptedCreateFixture](t, "interrupted_create.json")
+	client := &interruptedEventWriter{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		listResults:       [][]intervals.Event{nil, {fixture.CommittedEvent}},
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: fixture.Request})
+	if err != nil {
+		t.Fatalf("Handler() error = %v, want verified interrupted create recovery", err)
+	}
+	if len(client.writeCalls) != 1 || len(client.listCalls) != 2 {
+		t.Fatalf("writes=%d lists=%d, want preflight, one write, and bounded verification", len(client.writeCalls), len(client.listCalls))
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	if meta["operation"] != "create_recovered" || meta["confirmation_status"] != "verified_after_interrupted_write" || meta["duplicate_event_id"] != "committed-after-timeout" {
+		t.Fatalf("meta = %#v, want verified interrupted-write recovery", meta)
+	}
+}
+
+func TestCalendarReconciliationRetrySkipsPreviouslyCommittedCreate(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[interruptedCreateFixture](t, "interrupted_create.json")
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		events:            []intervals.Event{fixture.CommittedEvent},
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: fixture.Request})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("write calls = %#v, want retry skipped before a duplicate create", client.calls)
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	if meta["operation"] != "skip_duplicate" || meta["confirmation_status"] != "skipped_existing_event" || meta["duplicate_event_id"] != "committed-after-timeout" {
+		t.Fatalf("meta = %#v, want idempotent retry result", meta)
+	}
+}
+
+func TestCalendarReconciliationPartialRangeWriteIsNotReportedSuccessful(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[partialRangeFixture](t, "partial_range.json")
+	client := &fakeUnavailableDateRangeClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		created:           []intervals.Event{fixture.FirstCreatedEvent},
+		writeErrors:       []error{nil, errors.New("upstream interrupted second write")},
+	}
+	tool := newAddUnavailableDateRangeTool(client, client, "test", "UTC", false)
+
+	_, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: fixture.Request})
+	if err == nil {
+		t.Fatal("Handler() error = nil, want partial range write to remain an error")
+	}
+	if len(client.calls) != 2 || client.calls[0].Date != "2026-08-10" || client.calls[1].Date != "2026-08-11" {
+		t.Fatalf("write calls = %#v, want first success and second interrupted attempt", client.calls)
+	}
+	message, ok := PublicErrorMessage(err)
+	if !ok || message != writeUnavailableDateRangeMessage || strings.Contains(message, "second write") {
+		t.Fatalf("PublicErrorMessage(%v) = %q/%v, want terse partial-write error", err, message, ok)
+	}
+}
+
+func TestCalendarReconciliationInterruptedCreateWithoutVerificationReturnsActionableError(t *testing.T) {
+	t.Parallel()
+
+	fixture := readCalendarFixture[interruptedCreateFixture](t, "interrupted_create.json")
+	client := &interruptedEventWriter{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		listResults:       [][]intervals.Event{nil, nil},
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+
+	_, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: fixture.Request})
+	if err == nil {
+		t.Fatal("Handler() error = nil, want unverified interrupted write to remain an error")
+	}
+	message, ok := PublicErrorMessage(err)
+	if !ok || message != writeEventMessage || strings.Contains(message, "connection reset") {
+		t.Fatalf("PublicErrorMessage(%v) = %q/%v, want terse write guidance without transport detail", err, message, ok)
+	}
+}
+
+func readCalendarFixture[T any](t *testing.T, name string) T {
+	t.Helper()
+	path := filepath.Join("testdata", "calendar_reconciliation", name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var fixture T
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return fixture
+}

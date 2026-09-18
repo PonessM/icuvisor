@@ -1,0 +1,19 @@
+{
+  "request": {
+    "date": "2026-06-13",
+    "category": "WORKOUT",
+    "type": "Ride",
+    "name": "Retry-safe tempo",
+    "external_id": "calendar-reconciliation-retry-1",
+    "moving_time_seconds": 3600
+  },
+  "committed_event": {
+    "id": "committed-after-timeout",
+    "external_id": "calendar-reconciliation-retry-1",
+    "category": "WORKOUT",
+    "type": "Ride",
+    "name": "Retry-safe tempo",
+    "start_date_local": "2026-06-13T00:00:00",
+    "time_target": 3600
+  }
+}

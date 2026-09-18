@@ -1,0 +1,11 @@
+{
+  "events": [
+    {"id":"planned-strength","category":"WORKOUT","type":"WeightTraining","name":"Strength","start_date_local":"2026-05-20T07:00:00","time_target":2700,"activity_id":"strength-direct"},
+    {"id":"planned-ride","category":"WORKOUT","type":"Ride","name":"Tempo ride","start_date_local":"2026-05-20T18:00:00","time_target":3600,"activity_id":"ride-direct"}
+  ],
+  "activities": [
+    {"id":"strength-direct","external_id":"garmin-duplicate-42","source":"Garmin","type":"WeightTraining","start_date":"2026-05-20T10:00:00Z","start_date_local":"2026-05-20T07:00:00","moving_time":2700,"paired_event_id":"planned-strength"},
+    {"id":"strength-provider-duplicate","external_id":"garmin-duplicate-42","source":"Strava","type":"WeightTraining","start_date":"2026-05-20T10:00:00Z","start_date_local":"2026-05-20T07:00:00","moving_time":2700},
+    {"id":"ride-direct","external_id":"wahoo-session-7","source":"Wahoo","type":"Ride","start_date":"2026-05-20T21:00:00Z","start_date_local":"2026-05-20T18:00:00","moving_time":3600,"paired_event_id":"planned-ride"}
+  ]
+}

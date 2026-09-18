@@ -14,13 +14,15 @@ import (
 
 const (
 	addOrUpdateEventName                    = "add_or_update_event"
-	addOrUpdateEventDescription             = "Create or update a non-destructive calendar event such as a planned workout, race, or note. Omitting event_id creates a new event; providing event_id updates that event without deleting or replacing unrelated events; use delete_event to remove. Optional external_id is a non-empty upstream idempotency key for retry-safe creates/updates; omit it to leave the upstream key unchanged, and use event_id for intentional edits to an existing event. Creates preflight same-day calendar events, skip matching external_id retries, and skip exact duplicates when upstream fields already match; near-concurrent creates can still race if upstream does not enforce uniqueness. Before workout creates or updates, present a human-readable preview for user approval that covers total duration, key steps, target intensities, load/distance/time changes, and what existing title/prose/tags/structured steps are preserved. `description` is a replacement for the upstream event description/DSL, not append-only notes; omit it on updates to leave the current description unchanged. For WORKOUT updates, supplying `description` without `workout_doc` can replace existing structured steps; include the desired `workout_doc` to preserve or merge structure. When both are supplied, icuvisor merges them into the upstream description DSL and the `<!-- icuvisor:steps -->` sentinel controls serialized-step placement. WORKOUT `type` supplies sport context for structured zone targets, allowing icuvisor to emit metric suffixes when needed, such as `Z2 Power`, `Z2 HR`, or `Z2 Pace`. Prefer `workout_doc` when the structure is known, and call `validate_workout` first if uncertain about the DSL syntax (see icuvisor://workout-syntax)."
+	addOrUpdateEventDescription             = "Create or update a non-destructive calendar event such as a planned workout, race, or note. Omitting event_id creates a new event; providing event_id updates only that event and reports other events on the destination date so reschedules do not silently hide overlaps; use delete_event to remove. Optional external_id is a non-empty upstream idempotency key for retry-safe creates/updates; omit it to leave the upstream key unchanged, and use event_id for intentional edits to an existing event. Creates preflight same-day calendar events, skip matching external_id retries, and skip exact duplicates when upstream fields already match; an interrupted create is reported recovered only after a bounded same-day read verifies the intended event. Before workout creates or updates, present a human-readable preview for user approval that covers total duration, key steps, target intensities, load/distance/time changes, and what existing title/prose/tags/structured steps are preserved. `description` is a replacement for the upstream event description/DSL, not append-only notes; omit it on updates to leave the current description unchanged. For WORKOUT updates, supplying `description` without `workout_doc` can replace existing structured steps; include the desired `workout_doc` to preserve or merge structure. When both are supplied, icuvisor merges them into the upstream description DSL and the `<!-- icuvisor:steps -->` sentinel controls serialized-step placement. WORKOUT `type` supplies sport context for structured zone targets, allowing icuvisor to emit metric suffixes when needed, such as `Z2 Power`, `Z2 HR`, or `Z2 Pace`. Prefer `workout_doc` when the structure is known, and call `validate_workout` first if uncertain about the DSL syntax (see icuvisor://workout-syntax)."
 	descriptionOnlyWorkoutWarning           = "Description was written without workout_doc; if this item previously had structured steps, they may have been replaced. Include workout_doc when preserving or merging workout structure."
 	sameDayConflictWarning                  = "Same-day calendar events already exist; verify this create is not an unintended duplicate."
 	duplicateCreateSkippedWarning           = "Skipped create because an existing same-day event already matches the requested writable fields."
 	duplicateExternalIDSkippedWarning       = "Skipped create because an existing same-day event already has the requested external_id."
+	rescheduleOccupiedDateWarning           = "Target date already contains other events; only the requested event_id was updated. Verify the reschedule did not create an unintended overlap."
 	writeReturnedByUpstreamStatus           = "write_returned_by_upstream"
 	skippedExistingEventStatus              = "skipped_existing_event"
+	verifiedAfterInterruptedWriteStatus     = "verified_after_interrupted_write"
 	invalidAddOrUpdateEventArgumentsMessage = "invalid add_or_update_event arguments; provide date as athlete-local YYYY-MM-DD, category, type for WORKOUT events, name for NOTE creates, and optional event_id for updates"
 	writeEventMessage                       = "could not write event; check intervals.icu credentials, athlete ID, event ID, and writable event fields"
 )
@@ -118,11 +120,34 @@ func addOrUpdateEventHandler(client EventWriterClient, profileClient ProfileClie
 				}
 				return encodeShaped(payload, args.IncludeFull, nil, version, debugMetadata, addOrUpdateEventName, unitSystem, shapeCfg)
 			}
+		} else {
+			preflight, err = preflightEventUpdate(ctx, client, params)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return Result{}, err
+				}
+				return Result{}, NewUserError(writeEventMessage, err)
+			}
 		}
 		event, err := client.AddOrUpdateEvent(ctx, params)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return Result{}, err
+			}
+			if args.EventID == "" {
+				recovered, recoveryPreflight, recoveryErr := recoverInterruptedEventCreate(ctx, client, params)
+				if recoveryErr != nil && (errors.Is(recoveryErr, context.Canceled) || errors.Is(recoveryErr, context.DeadlineExceeded)) {
+					return Result{}, recoveryErr
+				}
+				if recovered != nil {
+					payload, shapeErr := shapeAddOrUpdateEventResponse(*recovered, args, timezoneName, workoutDocUploaded, profile, unitSystem, recoveryPreflight)
+					if shapeErr != nil {
+						return Result{}, fmt.Errorf("shaping add_or_update_event recovered response: %w", shapeErr)
+					}
+					payload.Meta.Operation = "create_recovered"
+					payload.Meta.ConfirmationStatus = verifiedAfterInterruptedWriteStatus
+					return encodeShaped(payload, args.IncludeFull, nil, version, debugMetadata, addOrUpdateEventName, unitSystem, shapeCfg)
+				}
 			}
 			return Result{}, NewUserError(writeEventMessage, err)
 		}
@@ -244,6 +269,9 @@ func shapeAddOrUpdateEventResponse(event intervals.Event, args addOrUpdateEventR
 		meta.SameDayConflicts = preflight.Conflicts
 	} else if len(preflight.Conflicts) > 0 {
 		meta.DuplicateWarning = sameDayConflictWarning
+		if args.EventID != "" {
+			meta.DuplicateWarning = rescheduleOccupiedDateWarning
+		}
 		meta.SameDayConflicts = preflight.Conflicts
 	}
 	return addOrUpdateEventResponse{Event: row, Meta: meta}, nil
@@ -268,6 +296,38 @@ func preflightEventCreateDuplicate(ctx context.Context, client EventWriterClient
 	return eventCreatePreflightFromEvents(params, events, nil), nil
 }
 
+func preflightEventUpdate(ctx context.Context, client EventWriterClient, params intervals.WriteEventParams) (eventCreatePreflightResult, error) {
+	reader, ok := client.(eventCalendarReaderClient)
+	if !ok {
+		return eventCreatePreflightResult{}, nil
+	}
+	events, err := reader.ListEvents(ctx, intervals.ListEventsParams{Oldest: params.Date, Newest: params.Date, Limit: maxEventsLimit})
+	if err != nil {
+		return eventCreatePreflightResult{}, fmt.Errorf("preflighting update target date: %w", err)
+	}
+	result := eventCreatePreflightResult{}
+	for _, event := range events {
+		if eventDateOnly(event) != params.Date || event.ID == params.EventID {
+			continue
+		}
+		result.Conflicts = append(result.Conflicts, eventWriteConflict(event, "existing_event_on_date"))
+	}
+	return result, nil
+}
+
+func recoverInterruptedEventCreate(ctx context.Context, client EventWriterClient, params intervals.WriteEventParams) (*intervals.Event, eventCreatePreflightResult, error) {
+	reader, ok := client.(eventCalendarReaderClient)
+	if !ok {
+		return nil, eventCreatePreflightResult{}, nil
+	}
+	events, err := reader.ListEvents(ctx, intervals.ListEventsParams{Oldest: params.Date, Newest: params.Date, Limit: maxEventsLimit})
+	if err != nil {
+		return nil, eventCreatePreflightResult{}, fmt.Errorf("verifying interrupted event create: %w", err)
+	}
+	preflight := eventCreatePreflightFromEvents(params, events, nil)
+	return preflight.Duplicate, preflight, nil
+}
+
 func eventCreatePreflightFromEvents(params intervals.WriteEventParams, events []intervals.Event, extraConflicts []applyTrainingPlanConflict) eventCreatePreflightResult {
 	result := eventCreatePreflightResult{Conflicts: append([]applyTrainingPlanConflict(nil), extraConflicts...)}
 	for _, event := range events {
@@ -286,9 +346,20 @@ func eventCreatePreflightFromEvents(params intervals.WriteEventParams, events []
 			result.Conflicts = []applyTrainingPlanConflict{{EventID: event.ID, Date: eventDateOnly(event), Reason: "duplicate_existing_event"}}
 			return result
 		}
-		result.Conflicts = append(result.Conflicts, applyTrainingPlanConflict{EventID: event.ID, Reason: "existing_event_on_date"})
+		result.Conflicts = append(result.Conflicts, eventWriteConflict(event, "existing_event_on_date"))
 	}
 	return result
+}
+
+func eventWriteConflict(event intervals.Event, reason string) applyTrainingPlanConflict {
+	return applyTrainingPlanConflict{
+		EventID:  event.ID,
+		Date:     eventDateOnly(event),
+		Category: firstNonEmpty(stringValue(event.Category), anyString(event.Raw["category"])),
+		Type:     firstNonEmpty(stringValue(event.Type), anyString(event.Raw["type"])),
+		Name:     firstNonEmpty(stringValue(event.Name), anyString(event.Raw["name"])),
+		Reason:   reason,
+	}
 }
 
 func eventMatchesExternalID(event intervals.Event, externalID string) bool {
@@ -538,5 +609,5 @@ func addOrUpdateEventInputExamples() []map[string]any {
 }
 
 func addOrUpdateEventOutputSchema() map[string]any {
-	return map[string]any{"type": "object", "additionalProperties": true, "description": "Write confirmation containing the same terse event row shape used by get_event_by_id plus operation/date/timezone metadata. _meta.confirmation_status is write_returned_by_upstream when intervals.icu returned a write payload, or skipped_existing_event when icuvisor skipped a duplicate create before writing. _meta.workout_doc_warning is set when intervals.icu stored the event but did not parse the uploaded workout_doc into a graphically rendered structured workout. _meta.description_only_workout_warning is set for WORKOUT event updates that supplied description without workout_doc."}
+	return map[string]any{"type": "object", "additionalProperties": true, "description": "Write confirmation containing the same terse event row shape used by get_event_by_id plus operation/date/timezone metadata. _meta.confirmation_status is write_returned_by_upstream when intervals.icu returned a write payload, skipped_existing_event when icuvisor skipped a duplicate create before writing, or verified_after_interrupted_write after a bounded same-day read confirmed a create whose response was interrupted. Updates report other destination-date events under _meta.same_day_conflicts without replacing them. _meta.workout_doc_warning is set when intervals.icu stored the event but did not parse the uploaded workout_doc into a graphically rendered structured workout. _meta.description_only_workout_warning is set for WORKOUT event updates that supplied description without workout_doc."}
 }
