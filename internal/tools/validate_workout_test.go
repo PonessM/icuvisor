@@ -163,6 +163,27 @@ func TestValidateWorkoutUnsupportedStepError(t *testing.T) {
 	}
 }
 
+func TestValidateWorkoutReportsConflictingPrimaryTargetsActionably(t *testing.T) {
+	t.Parallel()
+
+	resp := runValidateWorkout(t, `{"workout_doc":{"steps":[{"description":"Conflicting prescription","duration":600,"power":{"min":88,"max":94,"units":"PERCENT_FTP"},"hr":{"value":90,"units":"PERCENT_LTHR"},"pace":{"value":95,"units":"PERCENT_THRESHOLD"}}]}}`)
+	if resp.Valid {
+		t.Fatalf("Valid = true, want conflicting targets rejected")
+	}
+	if !diagContains(diagCodes(resp.Errors), "CONFLICTING_PRIMARY_TARGETS") {
+		t.Fatalf("errors = %+v, want CONFLICTING_PRIMARY_TARGETS", resp.Errors)
+	}
+	foundActionable := false
+	for _, diagnostic := range resp.Errors {
+		if diagnostic.Code == "CONFLICTING_PRIMARY_TARGETS" && strings.Contains(diagnostic.Message, "choose one") && strings.Contains(diagnostic.Message, "separate steps") {
+			foundActionable = true
+		}
+	}
+	if !foundActionable {
+		t.Fatalf("errors = %+v, want choose-one/separate-steps guidance", resp.Errors)
+	}
+}
+
 func TestValidateWorkoutRejectsStructuralTokenInStepDescription(t *testing.T) {
 	t.Parallel()
 	payload := `{"workout_doc":{"steps":[{"description":"Endurance 2h15m","duration":8100,"power":{"value":60,"units":"PERCENT_FTP"}}]}}`

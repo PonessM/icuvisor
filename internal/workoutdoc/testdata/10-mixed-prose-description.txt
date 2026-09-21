@@ -1,0 +1,5 @@
+# Pool threshold session
+Coach header: preserve this exactly.
+<!-- icuvisor:steps -->
+<!-- coach-comment: keep stroke count notes -->
+Post-session: record pool length and perceived effort.

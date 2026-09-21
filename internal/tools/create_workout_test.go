@@ -18,6 +18,39 @@ type fakeWorkoutCreatorClient struct {
 	err     error
 }
 
+type roundTripWorkoutFixtureClient struct {
+	fakeProfileClient
+	stored intervals.Workout
+}
+
+func (f *roundTripWorkoutFixtureClient) CreateLibraryWorkout(_ context.Context, params intervals.WriteWorkoutParams) (intervals.Workout, error) {
+	description := ""
+	if params.Description != nil {
+		description = *params.Description
+	}
+	parsed := workoutdoc.ValidateDescription(description)
+	raw, err := json.Marshal(parsed.Doc)
+	if err != nil {
+		return intervals.Workout{}, err
+	}
+	var upstreamDoc map[string]any
+	if err := json.Unmarshal(raw, &upstreamDoc); err != nil {
+		return intervals.Workout{}, err
+	}
+	name := params.Name
+	sport := params.Sport
+	f.stored.ID = "fixture-round-trip"
+	f.stored.Name = &name
+	f.stored.Type = &sport
+	f.stored.Description = params.Description
+	f.stored.WorkoutDoc = upstreamDoc
+	return f.stored, nil
+}
+
+func (f *roundTripWorkoutFixtureClient) ListLibraryWorkouts(context.Context) ([]intervals.Workout, error) {
+	return []intervals.Workout{f.stored}, nil
+}
+
 func (f *fakeWorkoutCreatorClient) CreateLibraryWorkout(ctx context.Context, params intervals.WriteWorkoutParams) (intervals.Workout, error) {
 	f.calls = append(f.calls, params)
 	return f.workout, f.err
@@ -208,6 +241,25 @@ func TestWorkoutDocRenderWarningDetectsPartialFidelityLoss(t *testing.T) {
 	if !strings.Contains(warning, "partially parsed") {
 		t.Fatalf("workoutDocRenderWarning() = %q, want partial-fidelity warning", warning)
 	}
+	if got := workoutDocLossyFields(uploaded, upstream); !reflect.DeepEqual(got, []string{"steps[0].rpe"}) {
+		t.Fatalf("workoutDocLossyFields() = %#v, want dropped RPE path", got)
+	}
+}
+
+func TestWorkoutDocLossyFieldsKeepsGenericZoneTargetFamily(t *testing.T) {
+	t.Parallel()
+
+	zone := float64(2)
+	uploaded := &workoutdoc.WorkoutDoc{Steps: []workoutdoc.Step{{Description: "Recovery", Duration: 120, Pace: &workoutdoc.Target{Value: &zone, Units: "ZONE"}}}}
+	upstream := map[string]any{"steps": []any{map[string]any{
+		"text":     "Recovery",
+		"duration": float64(120),
+		"pace":     map[string]any{"value": float64(2), "units": "pace_zone"},
+	}}}
+
+	if got := workoutDocLossyFields(uploaded, upstream); len(got) != 0 {
+		t.Fatalf("workoutDocLossyFields() = %#v, want generic pace ZONE preserved as pace_zone", got)
+	}
 }
 
 func TestWorkoutDocRenderWarningDetectsMissingPressLapControl(t *testing.T) {
@@ -234,6 +286,53 @@ func TestWorkoutDocRenderWarningDetectsIssue25CapturedPartialLoss(t *testing.T) 
 	warning := workoutDocRenderWarning(&uploaded, upstream)
 	if warning != workoutDocPartialFidelityWarning {
 		t.Fatalf("workoutDocRenderWarning() = %q, want captured partial-fidelity warning", warning)
+	}
+	lossy := workoutDocLossyFields(&uploaded, upstream)
+	for _, want := range []string{"steps[2].reps", "steps[2].steps", "steps[8].rpe"} {
+		if !containsString(lossy, want) {
+			t.Fatalf("workoutDocLossyFields() = %#v, want %q", lossy, want)
+		}
+	}
+}
+
+func TestCreateWorkoutResponseEnumeratesUpstreamLossiness(t *testing.T) {
+	t.Parallel()
+
+	uploaded := readWorkoutDocFixture(t, "06-full-surface-upstream-candidate-structured.json")
+	uploadedJSON, err := json.Marshal(uploaded)
+	if err != nil {
+		t.Fatalf("marshal uploaded fixture: %v", err)
+	}
+	upstreamJSON := readTextFixture(t, "06-full-surface-upstream-response-workout-doc.json")
+	client := &fakeWorkoutCreatorClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
+		workout: decodeToolWorkouts(t,
+			`{"id":"w-lossy","name":"Lossy","type":"Ride","folder_id":"f-20","workout_doc":`+upstreamJSON+`}`,
+		)[0],
+	}
+	tool := newCreateWorkoutTool(client, client, "test", "UTC", false)
+	args := `{"name":"Lossy","folder_id":"f-20","sport":"Ride","workout_doc":` + string(uploadedJSON) + `}`
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(args)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	meta := resultMap(t, result)["_meta"].(map[string]any)
+	lossy, ok := meta["lossy_fields"].([]any)
+	if !ok || len(lossy) == 0 {
+		t.Fatalf("lossy_fields = %#v, want enumerated paths", meta["lossy_fields"])
+	}
+	for _, want := range []string{"steps[2].reps", "steps[2].steps", "steps[8].rpe"} {
+		found := false
+		for _, value := range lossy {
+			if value == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("lossy_fields = %#v, want %q", lossy, want)
+		}
 	}
 }
 
@@ -375,6 +474,67 @@ func TestCreateWorkoutGoldenFixtureRoundTripFromWorkoutDocSerializer(t *testing.
 	}
 	if len(client.calls) != 1 || client.calls[0].FolderID != "f-test-folder" || client.calls[0].Description == nil || *client.calls[0].Description != wantDSL {
 		t.Fatalf("description call = %#v, want folder ID and golden DSL %q", client.calls, wantDSL)
+	}
+}
+
+func TestWorkoutSerializationValidateSubmitRefetchReparseFixtureFlow(t *testing.T) {
+	t.Parallel()
+
+	doc := readWorkoutDocFixture(t, "09-cross-sport-target-boundaries-structured.json")
+	dsl := strings.TrimRight(readTextFixture(t, "09-cross-sport-target-boundaries-dsl.txt"), "\n")
+	prose := readTextFixture(t, "10-mixed-prose-description.txt")
+	wantCanonical := strings.Replace(prose, workoutdoc.StepsSentinel, dsl, 1)
+
+	preflight := validateWorkout(validateWorkoutRequest{Description: &prose, WorkoutDoc: &doc})
+	if !preflight.Valid || len(preflight.Errors) != 0 {
+		t.Fatalf("validate preflight = %+v, want valid local dry-run", preflight)
+	}
+	if preflight.CanonicalDSL != wantCanonical {
+		t.Fatalf("canonical preflight mismatch\n--- got ---\n%s\n--- want ---\n%s", preflight.CanonicalDSL, wantCanonical)
+	}
+
+	client := &roundTripWorkoutFixtureClient{fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{
+		ID:             "i12345",
+		PreferredUnits: "metric",
+		Timezone:       "UTC",
+		SportSettings: []intervals.SportSettings{{
+			Types:         []string{"Swim"},
+			FTP:           300,
+			ThresholdPace: 1.25,
+			PaceUnits:     "SECS_100M",
+			PaceZones:     []float64{80, 90, 100, 110},
+		}},
+	}}}
+	tool := newCreateWorkoutTool(client, client, "test", "UTC", false)
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	args := mustMarshalArgs(t, map[string]any{
+		"name":        "Round trip fixture",
+		"folder_id":   "fixture-folder",
+		"sport":       "Swim",
+		"description": prose,
+		"workout_doc": json.RawMessage(rawDoc),
+	})
+	if _, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(args)}); err != nil {
+		t.Fatalf("create fixture Handler() error = %v", err)
+	}
+
+	refetched, err := client.ListLibraryWorkouts(context.Background())
+	if err != nil || len(refetched) != 1 || refetched[0].Description == nil {
+		t.Fatalf("fixture re-fetch = %#v, err=%v", refetched, err)
+	}
+	if *refetched[0].Description != wantCanonical {
+		t.Fatalf("re-fetched description mismatch\n--- got ---\n%s\n--- want ---\n%s", *refetched[0].Description, wantCanonical)
+	}
+	reparsed := workoutdoc.ValidateDescription(*refetched[0].Description)
+	if len(reparsed.Errors) != 0 || !reflect.DeepEqual(reparsed.Doc.Steps, doc.Steps) {
+		t.Fatalf("re-parse = %+v, want source fixture steps", reparsed)
+	}
+	revalidated := validateWorkout(validateWorkoutRequest{Description: refetched[0].Description})
+	if !revalidated.Valid || revalidated.CanonicalDSL != wantCanonical {
+		t.Fatalf("re-fetched validation = %+v, want exact canonical description", revalidated)
 	}
 }
 

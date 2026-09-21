@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Calendar event writes now report occupied-date reschedule conflicts, reconcile interrupted creates with a bounded same-day verification read, and keep unverified writes as terse actionable errors. Activity/event linking now skips verified retries, refuses to overwrite a different pairing, and verifies new links before reporting success.
 - Added fixture-backed calendar reconciliation contracts for same-day distinct sessions, planned/completed linking, provider duplicates, positive/negative timezone offsets and DST, multi-day races, retry idempotency, and interrupted writes.
+- Hardened structured-workout round trips across sports: absolute swim pace targets now preserve seconds-per-100-metre/yard ranges, target previews require exact sport settings and report missing FTP/CSS/zone context, conflicting primary targets and invalid zone/range boundaries fail explicitly, and workout-library writes enumerate upstream lossy fields.
 
 ## [1.6.4] - 2026-08-30
 

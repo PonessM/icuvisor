@@ -1,0 +1,33 @@
+{
+  "steps": [
+    {
+      "description": "Metric swim",
+      "distance": {"value": 400, "unit": "mtr"},
+      "pace": {"min": 88, "max": 92, "units": "SECS_100M"}
+    },
+    {
+      "description": "Yard recovery",
+      "distance": {"value": 100, "unit": "yrd"},
+      "pace": {"value": 105, "units": "SECS_100Y"}
+    },
+    {
+      "description": "Run threshold",
+      "distance": {"value": 1, "unit": "km"},
+      "pace": {"min": 245, "max": 255, "units": "MINS_KM"}
+    },
+    {
+      "description": "FTP range",
+      "duration": 600,
+      "power": {"min": 88, "max": 94, "units": "PERCENT_FTP"}
+    },
+    {
+      "description": "Recovery",
+      "duration": 120,
+      "pace": {"value": 1, "units": "PACE_ZONE"}
+    },
+    {
+      "description": "Rest",
+      "duration": 30
+    }
+  ]
+}

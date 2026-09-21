@@ -70,6 +70,8 @@ Main set 3x
 - `pace_zone` (`pace`): Pace zones. Units: `ZONE`, `PACE_ZONE`.
 - `pace_mins_km` (`pace`): Absolute running pace in seconds per kilometer, serialized as `mm:ss/km Pace`. Units: `MINS_KM`.
 - `pace_mins_mile` (`pace`): Absolute running pace in seconds per mile, serialized as `mm:ss/mi Pace`. Units: `MINS_MILE`.
+- `pace_secs_100m` (`pace`): Absolute metric swim pace in seconds per 100 meters, serialized as `mm:ss/100m Pace`. Units: `SECS_100M`.
+- `pace_secs_100y` (`pace`): Absolute yard-pool swim pace in seconds per 100 yards, serialized as `mm:ss/100y Pace`. Units: `SECS_100Y`.
 - `pace_numeric` (`pace`): Numeric PACE values as currently emitted by the serializer. Units: `PACE`.
 - `rpe` (`rpe`): Rating of perceived exertion scalar or range. Units: ``, `RPE`.
 
@@ -232,7 +234,7 @@ Heart-rate targets support percent max HR, percent LTHR, bpm, HR zones, scalar v
 
 ### Pace targets
 
-Pace targets support percent threshold pace, pace zones, absolute seconds-per-km or seconds-per-mile values, numeric PACE values, and non-ramp text pace labels.
+Pace targets support percent threshold pace, pace zones, absolute run and swim duration-per-distance values, numeric PACE values, and non-ramp text pace labels.
 
 - `pace_percent`: Percent threshold pace scalar.
 
@@ -256,6 +258,18 @@ Pace targets support percent threshold pace, pace zones, absolute seconds-per-km
 
 ```text
 - Imperial pace 8m 8:00/mi Pace
+```
+
+- `pace_secs_100m`: Absolute seconds-per-100-meter swim pace.
+
+```text
+- Metric swim pace 100mtr 1:30/100m Pace
+```
+
+- `pace_secs_100y`: Absolute seconds-per-100-yard swim pace.
+
+```text
+- Yard swim pace 100yrd 1:25/100y Pace
 ```
 
 - `pace_numeric`: Numeric PACE unit as currently serialized.

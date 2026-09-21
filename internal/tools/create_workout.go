@@ -46,6 +46,7 @@ type createWorkoutMeta struct {
 	Tags                []string `json:"tags,omitempty"`
 	WorkoutDocUploaded  string   `json:"workout_doc_uploaded,omitempty"`
 	WorkoutDocWarning   string   `json:"workout_doc_warning,omitempty"`
+	LossyFields         []string `json:"lossy_fields,omitempty"`
 	DefaultPayloadScope string   `json:"default_payload_scope"`
 }
 
@@ -126,7 +127,7 @@ func createWorkoutParams(args createWorkoutRequest, options workoutdoc.Serialize
 }
 
 func shapeCreateWorkoutResponse(workout intervals.Workout, args createWorkoutRequest, workoutDocUploaded string, profile intervals.AthleteWithSportSettings, unitSystem response.UnitSystem) createWorkoutResponse {
-	return createWorkoutResponse{Workout: workoutToRow(workout, false, workoutPreviewContextForWorkout(workout, profile, unitSystem)), Meta: createWorkoutMeta{Operation: "create", SourceEndpoint: workoutLibraryWorkoutsEndpoint, FolderID: args.FolderID, Sport: args.Sport, Tags: append([]string(nil), args.Tags...), WorkoutDocUploaded: workoutDocUploaded, WorkoutDocWarning: workoutDocRenderWarning(args.WorkoutDoc, workout.WorkoutDoc), DefaultPayloadScope: "same terse workout row shape used by get_workout_library/get_workouts_in_folder; raw workout_doc remains summarized"}}
+	return createWorkoutResponse{Workout: workoutToRow(workout, false, workoutPreviewContextForWorkout(workout, profile, unitSystem)), Meta: createWorkoutMeta{Operation: "create", SourceEndpoint: workoutLibraryWorkoutsEndpoint, FolderID: args.FolderID, Sport: args.Sport, Tags: append([]string(nil), args.Tags...), WorkoutDocUploaded: workoutDocUploaded, WorkoutDocWarning: workoutDocRenderWarning(args.WorkoutDoc, workout.WorkoutDoc), LossyFields: workoutDocLossyFields(args.WorkoutDoc, workout.WorkoutDoc), DefaultPayloadScope: "same terse workout row shape used by get_workout_library/get_workouts_in_folder; raw workout_doc remains summarized"}}
 }
 
 func createWorkoutInputSchema() map[string]any {

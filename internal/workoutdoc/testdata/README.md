@@ -19,6 +19,14 @@ dropped the RPE target from `Strides`.
 set is followed by a top-level cooldown. The de-indented cooldown line is a
 sibling after the repeat block, not a child that repeats with the main set.
 
+`09-cross-sport-target-boundaries-*` locks absolute run and swim pace ranges,
+metric and yard pool distances, an explicit percent-FTP range, and a recovery
+pace-zone boundary without deriving any athlete threshold.
+
+`10-mixed-prose-description.txt` is the prose/header/comment envelope used by
+the local validation, submit, re-fetch, and re-parse fixture flow. Its sentinel
+is replaced by structured steps; every other byte is preserved.
+
 The remaining UI smoke for issue #25 is to create the equivalent workout in the
 Intervals.icu web editor, fetch its `description` and `workout_doc` with
 `include_full:true`, and replace or add a fixture if the UI emits a different

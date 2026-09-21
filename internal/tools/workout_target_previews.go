@@ -30,6 +30,13 @@ type workoutTargetPreviewRow struct {
 	RepeatReps  int    `json:"repeat_reps,omitempty"`
 }
 
+type workoutTargetPreviewDiagnostic struct {
+	Code    string `json:"code"`
+	Family  string `json:"family"`
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
 type workoutTargetBounds struct {
 	Values []float64
 }
@@ -43,20 +50,128 @@ func workoutPreviewContextForWorkout(workout intervals.Workout, profile interval
 }
 
 func workoutTargetPreviews(value any, ctx workoutTargetPreviewContext) []workoutTargetPreviewRow {
+	previews, _ := workoutTargetPreviewsWithDiagnostics(value, ctx)
+	return previews
+}
+
+func workoutTargetPreviewsWithDiagnostics(value any, ctx workoutTargetPreviewContext) ([]workoutTargetPreviewRow, []workoutTargetPreviewDiagnostic) {
 	if ctx.Profile == nil {
-		return nil
-	}
-	setting, ok := selectWorkoutPreviewSportSetting(ctx.Profile.SportSettings, ctx.Sport)
-	if !ok {
-		return nil
+		return nil, nil
 	}
 	steps, ok := workoutDocSteps(value)
 	if !ok {
-		return nil
+		return nil, nil
 	}
+	setting, settingAvailable := selectWorkoutPreviewSportSetting(ctx.Profile.SportSettings, ctx.Sport)
 	previews := make([]workoutTargetPreviewRow, 0)
-	walkWorkoutPreviewSteps(steps, setting, ctx, nil, 0, &previews)
-	return previews
+	if settingAvailable {
+		walkWorkoutPreviewSteps(steps, setting, ctx, nil, 0, &previews)
+	}
+	diagnostics := make([]workoutTargetPreviewDiagnostic, 0)
+	walkWorkoutPreviewDiagnostics(steps, setting, settingAvailable, ctx.Sport, nil, &diagnostics)
+	return previews, diagnostics
+}
+
+func walkWorkoutPreviewDiagnostics(steps []any, setting intervals.SportSettings, settingAvailable bool, sport string, parent []int, diagnostics *[]workoutTargetPreviewDiagnostic) {
+	for index, raw := range steps {
+		stepMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		pathParts := append(append([]int(nil), parent...), index+1)
+		path := workoutPreviewPath(pathParts)
+		for _, family := range []string{"power", "hr", "pace"} {
+			target, ok := stepMap[family].(map[string]any)
+			if !ok || strings.TrimSpace(anyString(target["text"])) != "" {
+				continue
+			}
+			if diagnostic, ok := workoutTargetContextDiagnostic(family, target, setting, settingAvailable, sport, path); ok {
+				*diagnostics = append(*diagnostics, diagnostic)
+			}
+		}
+		if children, ok := stepMap["steps"].([]any); ok {
+			walkWorkoutPreviewDiagnostics(children, setting, settingAvailable, sport, pathParts, diagnostics)
+		}
+	}
+}
+
+func workoutTargetContextDiagnostic(family string, target map[string]any, setting intervals.SportSettings, settingAvailable bool, sport string, path string) (workoutTargetPreviewDiagnostic, bool) {
+	units := strings.ToUpper(strings.TrimSpace(anyString(target["units"])))
+	contextRequired := false
+	code := ""
+	switch family {
+	case "power":
+		switch units {
+		case "", "PERCENT_FTP", "%FTP":
+			contextRequired = true
+			if settingAvailable && setting.FTP <= 0 {
+				code = "missing_power_ftp"
+			}
+		case "ZONE", "POWER_ZONE":
+			contextRequired = true
+			if settingAvailable && len(setting.PowerZoneUpperBoundsPercentOfFTP) == 0 {
+				code = "missing_power_zones"
+			}
+		}
+	case "hr":
+		switch units {
+		case "PERCENT_LTHR", "%LTHR", "LTHR":
+			contextRequired = true
+			if settingAvailable && firstNonZero(setting.LTHR, setting.FTHR) <= 0 {
+				code = "missing_lthr"
+			}
+		case "PERCENT_HR", "PERCENT_MAX_HR", "%HR", "HR":
+			contextRequired = true
+			if settingAvailable && setting.MaxHR <= 0 {
+				code = "missing_max_hr"
+			}
+		case "ZONE", "HR_ZONE":
+			contextRequired = true
+			if settingAvailable && len(setting.HRZones) == 0 {
+				code = "missing_hr_zones"
+			}
+		}
+	case "pace":
+		switch units {
+		case "", "PERCENT_THRESHOLD", "PERCENT_THRESHOLD_PACE", "PERCENT_PACE", "%PACE":
+			contextRequired = true
+			if settingAvailable && firstNonZeroFloat(setting.ThresholdPace, setting.PaceThreshold) <= 0 {
+				code = "missing_pace_threshold"
+			}
+		case "ZONE", "PACE_ZONE":
+			contextRequired = true
+			if settingAvailable && len(setting.PaceZones) == 0 {
+				code = "missing_pace_zones"
+			}
+		}
+	}
+	if !contextRequired {
+		return workoutTargetPreviewDiagnostic{}, false
+	}
+	if !settingAvailable {
+		code = "missing_sport_settings"
+	}
+	if code == "" {
+		return workoutTargetPreviewDiagnostic{}, false
+	}
+	message := workoutTargetContextDiagnosticMessage(code, family, sport)
+	return workoutTargetPreviewDiagnostic{Code: code, Family: family, Path: path, Message: message}, true
+}
+
+func workoutTargetContextDiagnosticMessage(code string, family string, sport string) string {
+	subject := map[string]string{
+		"missing_power_ftp":      "configured FTP",
+		"missing_power_zones":    "configured power-zone boundaries",
+		"missing_lthr":           "configured lactate-threshold heart rate",
+		"missing_max_hr":         "configured maximum heart rate",
+		"missing_hr_zones":       "configured heart-rate zone boundaries",
+		"missing_pace_threshold": "configured threshold pace/CSS",
+		"missing_pace_zones":     "configured pace-zone boundaries",
+	}[code]
+	if code == "missing_sport_settings" {
+		return fmt.Sprintf("%s target preview unavailable: no athlete sport settings match sport %q", family, sport)
+	}
+	return fmt.Sprintf("%s target preview unavailable: %s is missing for sport %q", family, subject, sport)
 }
 
 func workoutDocSteps(value any) ([]any, bool) {
@@ -180,13 +295,7 @@ func workoutTargetNumericBounds(target map[string]any) (workoutTargetBounds, boo
 }
 
 func selectWorkoutPreviewSportSetting(settings []intervals.SportSettings, sport string) (intervals.SportSettings, bool) {
-	if setting, ok := findSportSetting(settings, sport); ok {
-		return setting, true
-	}
-	if len(settings) == 1 {
-		return settings[0], true
-	}
-	return intervals.SportSettings{}, false
+	return findSportSetting(settings, sport)
 }
 
 func percentTargetLabel(bounds workoutTargetBounds, suffix string) string {
