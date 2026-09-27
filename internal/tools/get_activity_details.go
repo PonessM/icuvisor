@@ -401,20 +401,27 @@ func isCustomIntervalFieldValue(value any) bool {
 	}
 }
 
-var knownIntervalRawFields = map[string]struct{}{
-	"id": {}, "name": {}, "label": {}, "type": {}, "unit": {}, "group_id": {},
-	"start_index": {}, "end_index": {}, "start_time": {}, "end_time": {},
-	"start_distance": {}, "end_distance": {}, "distance": {}, "duration": {},
-	"moving_time": {}, "elapsed_time": {}, "elapsed_time_excluding_pauses": {}, "recording_time": {},
-	"average_power": {}, "average_watts": {}, "average_watts_kg": {}, "weighted_average_watts": {},
-	"min_watts": {}, "max_watts": {}, "normalized_power": {}, "intensity": {},
-	"average_hr": {}, "average_heartrate": {}, "max_heartrate": {}, "min_heartrate": {},
-	"average_cadence": {}, "max_cadence": {}, "average_speed": {}, "max_speed": {},
-	"average_pace": {}, "pace": {}, "gap": {}, "total_elevation_gain": {}, "total_elevation_loss": {},
-	"average_stride": {}, "average_dfa_a1": {}, "wbal_start": {}, "wbal_end": {},
-	"joules_above_ftp": {}, "decoupling": {}, "avg_lr_balance": {}, "strain_score": {}, "training_load": {},
-	"w5s_variability": {}, "power_zone": {}, "hr_zone": {}, "pace_zone": {},
-}
+var knownIntervalRawFields = func() map[string]struct{} {
+	fields := map[string]struct{}{
+		"id": {}, "name": {}, "label": {}, "type": {}, "unit": {}, "group_id": {},
+		"start_index": {}, "end_index": {}, "start_time": {}, "end_time": {},
+		"start_distance": {}, "end_distance": {}, "distance": {}, "duration": {},
+		"moving_time": {}, "elapsed_time": {}, "elapsed_time_excluding_pauses": {}, "recording_time": {},
+		"average_power": {}, "average_watts": {}, "average_watts_kg": {}, "weighted_average_watts": {},
+		"min_watts": {}, "max_watts": {}, "normalized_power": {}, "intensity": {},
+		"average_hr": {}, "average_heartrate": {}, "max_heartrate": {}, "min_heartrate": {},
+		"average_cadence": {}, "min_cadence": {}, "max_cadence": {}, "average_speed": {}, "max_speed": {},
+		"average_pace": {}, "pace": {}, "gap": {}, "total_elevation_gain": {}, "total_elevation_loss": {},
+		"average_stride": {}, "average_dfa_a1": {}, "wbal_start": {}, "wbal_end": {},
+		"joules_above_ftp": {}, "decoupling": {}, "avg_lr_balance": {}, "strain_score": {}, "training_load": {},
+		"w5s_variability": {}, "power_zone": {}, "hr_zone": {}, "pace_zone": {},
+		"average_impact_loading_rate": {},
+	}
+	for _, metric := range documentedRunningDynamicsProvenance {
+		fields[metric.SourceField] = struct{}{}
+	}
+	return fields
+}()
 
 func shapeActivityIntervalGroup(group intervals.IntervalGroup, includeFull bool) activityIntervalGroup {
 	row := activityIntervalGroup{GroupID: group.ID, Name: stringValue(group.Name), Type: stringValue(group.Type), StartIndex: intValue(group.StartIndex), EndIndex: intValue(group.EndIndex)}

@@ -202,8 +202,14 @@ func TestGetActivityDetailsIncludesNativeRunningDynamicsOnlyWhenAvailable(t *tes
 		t.Fatalf("unverified impact metric leaked: %#v", dynamics)
 	}
 	provenance := resultMap(t, result)["_meta"].(map[string]any)["running_dynamics_provenance"].(map[string]any)
-	if provenance["average_stance_time"].(map[string]any)["source_kind"] != "native_intervals" || provenance["average_stance_time"].(map[string]any)["source_field"] != "average_stance_time" {
-		t.Fatalf("running dynamics provenance = %#v", provenance)
+	for _, metric := range documentedRunningDynamics {
+		if metric.responseField == "average_vertical_ratio" {
+			continue
+		}
+		entry := provenance[metric.responseField].(map[string]any)
+		if entry["source_kind"] != "native_intervals" || entry["source_field"] != metric.sourceField || entry["scope"] != "activity" || entry["source_endpoint"] != "GET /api/v1/activity/{id}" {
+			t.Fatalf("running dynamics provenance[%s] = %#v", metric.responseField, entry)
+		}
 	}
 	if _, ok := provenance["average_vertical_ratio"]; ok {
 		t.Fatalf("provenance included malformed field: %#v", provenance)
@@ -578,6 +584,42 @@ func TestGetActivityIntervalsExposesCustomFieldsInTerseMode(t *testing.T) {
 		if _, ok := custom[key]; ok {
 			t.Fatalf("custom_fields included %q: %#v", key, custom)
 		}
+	}
+}
+
+func TestGetActivityIntervalsDoesNotClassifyNativeRunningFieldsAsCustom(t *testing.T) {
+	t.Parallel()
+	client := &fakeActivityReadClient{intervals: decodeIntervalsFileFixture(t, runningDynamicsIntervalsFixture)}
+	client.intervals.ICUIntervals[0].Raw["lactate"] = float64(3.8)
+	tool := newGetActivityIntervalsTool(client, client, "test", false)
+
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-running-dynamics-fixture"}`)})
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	row := resultMap(t, result)["intervals"].([]any)[0].(map[string]any)
+	custom := row["custom_fields"].(map[string]any)
+	if custom["lactate"] != float64(3.8) {
+		t.Fatalf("custom_fields = %#v, want athlete-defined lactate", custom)
+	}
+	for _, metric := range documentedRunningDynamics {
+		if _, ok := custom[metric.sourceField]; ok {
+			t.Fatalf("custom_fields included native %s: %#v", metric.sourceField, custom)
+		}
+	}
+	for _, key := range []string{"min_cadence", "average_impact_loading_rate"} {
+		if _, ok := custom[key]; ok {
+			t.Fatalf("custom_fields included unit-unverified native %s: %#v", key, custom)
+		}
+	}
+
+	result, err = tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":"activity-running-dynamics-fixture","include_full":true}`)})
+	if err != nil {
+		t.Fatalf("Handler() include_full error = %v", err)
+	}
+	full := resultMap(t, result)["intervals"].([]any)[0].(map[string]any)["full"].(map[string]any)
+	if full["average_stance_time"] != float64(246) {
+		t.Fatalf("full average_stance_time = %#v, want raw native field", full["average_stance_time"])
 	}
 }
 

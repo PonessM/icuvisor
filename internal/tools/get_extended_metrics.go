@@ -343,7 +343,11 @@ func presentRunningDynamicsProvenance(raw map[string]any) map[string]extendedMet
 	for responseField, source := range provenance {
 		if rawNumberPtr(raw, source.SourceField) == nil {
 			delete(provenance, responseField)
+			continue
 		}
+		source.Scope = "activity"
+		source.SourceEndpoint = "GET /api/v1/activity/{id}"
+		provenance[responseField] = source
 	}
 	return provenance
 }
