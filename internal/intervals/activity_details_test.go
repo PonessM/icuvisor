@@ -142,3 +142,32 @@ func TestGetActivityIntervalsKeepsLapWhenOptionalNumberIsMalformed(t *testing.T)
 		t.Fatalf("raw malformed average_hr = %#v, want preserved", dto.ICUIntervals[0].Raw["average_hr"])
 	}
 }
+
+func TestActivityIntervalNormalizesIntegralIndexSpellings(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		startIndex string
+		endIndex   string
+		wantStart  int
+		wantEnd    int
+		wantValid  bool
+	}{
+		{name: "integral decimal and exponent", startIndex: "1.0", endIndex: "1e2", wantStart: 1, wantEnd: 100, wantValid: true},
+		{name: "fractional and out of range", startIndex: "1.5", endIndex: "1e100"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var lap ActivityInterval
+			if err := json.Unmarshal([]byte(`{"id":"lap-1","name":"Work","start_index":`+tc.startIndex+`,"end_index":`+tc.endIndex+`,"duration":240,"average_hr":151}`), &lap); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			if (lap.StartIndex != nil) != tc.wantValid || (lap.EndIndex != nil) != tc.wantValid || (tc.wantValid && (*lap.StartIndex != tc.wantStart || *lap.EndIndex != tc.wantEnd)) {
+				t.Fatalf("indexes = %v/%v, want %d/%d (valid %v)", lap.StartIndex, lap.EndIndex, tc.wantStart, tc.wantEnd, tc.wantValid)
+			}
+			if lap.Duration == nil || *lap.Duration != 240 || lap.AverageHR == nil || *lap.AverageHR != 151 || lap.Raw["start_index"] == nil || lap.Raw["end_index"] == nil {
+				t.Fatalf("lap = %#v, want readable numeric fields and raw indexes", lap)
+			}
+		})
+	}
+}

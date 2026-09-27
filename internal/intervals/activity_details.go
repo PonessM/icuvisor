@@ -113,6 +113,9 @@ func (i *ActivityInterval) UnmarshalJSON(data []byte) error {
 		if !valid {
 			delete(decodeRaw, key)
 			changed = true
+		} else if key == "start_index" || key == "end_index" {
+			decodeRaw[key] = int(number)
+			changed = true
 		}
 	}
 	if changed {
