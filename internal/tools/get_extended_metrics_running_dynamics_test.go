@@ -64,7 +64,7 @@ func TestExtendedMetricsReturnsDocumentedRunningDynamicsAtActivityAndIntervalSco
 			t.Fatalf("extended_metric_units[%s] = %v, want %q", tc.responseField, got, tc.unit)
 		}
 		entry := provenance[tc.responseField].(map[string]any)
-		if entry["source_field"] != tc.sourceField || entry["response_field"] != tc.responseField || entry["unit"] != tc.unit || entry["scope"] != "activity_and_interval" || entry["source_endpoint"] != "GET /api/v1/activity/{id}; GET /api/v1/activity/{id}/intervals" || entry["availability"] != "conditional" {
+		if entry["source_field"] != tc.sourceField || entry["response_field"] != tc.responseField || entry["unit"] != tc.unit || entry["scope"] != "activity_and_interval" || entry["source_endpoint"] != "GET /api/v1/activity/{id}; GET /api/v1/activity/{id}/intervals" || entry["availability"] != "conditional" || entry["source_kind"] != "native_intervals" {
 			t.Fatalf("metric_provenance[%s] = %#v", tc.responseField, entry)
 		}
 	}
@@ -119,6 +119,19 @@ func TestExtendedMetricsOmitsUnavailableDocumentedRunningDynamicsButKeepsThemRaw
 	intervalRaw := full["intervals"].(map[string]any)["icu_intervals"].([]any)[0].(map[string]any)
 	if activityRaw["average_stance_time"] != nil || intervalRaw["average_stance_time"] != "malformed" {
 		t.Fatalf("full raw running dynamics = activity %#v interval %#v", activityRaw, intervalRaw)
+	}
+	diagnostics := payload["_meta"].(map[string]any)["data_availability"].([]any)
+	var activityNull, intervalMalformed bool
+	for _, item := range diagnostics {
+		diagnostic := item.(map[string]any)
+		fields := diagnostic["source_fields"].([]any)
+		if len(fields) == 1 && fields[0] == "average_stance_time" {
+			activityNull = activityNull || diagnostic["reason"] == "running_dynamics_null" && diagnostic["interval_id"] == nil
+			intervalMalformed = intervalMalformed || diagnostic["reason"] == "running_dynamics_malformed" && diagnostic["interval_id"] == "cadence-only"
+		}
+	}
+	if !activityNull || !intervalMalformed {
+		t.Fatalf("running-dynamics diagnostics = %#v, want activity null and interval malformed", diagnostics)
 	}
 }
 

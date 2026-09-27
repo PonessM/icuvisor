@@ -34,6 +34,7 @@ type EventWriterClient interface {
 
 type addOrUpdateEventRequest struct {
 	Date               string                 `json:"date"`
+	EndDateLocal       *string                `json:"end_date_local,omitempty"`
 	EventID            string                 `json:"event_id,omitempty"`
 	ExternalID         string                 `json:"external_id,omitempty"`
 	Category           string                 `json:"category"`
@@ -45,6 +46,8 @@ type addOrUpdateEventRequest struct {
 	Color              *string                `json:"color,omitempty"`
 	NotOnFitnessChart  *bool                  `json:"not_on_fitness_chart,omitempty"`
 	Indoor             *bool                  `json:"indoor,omitempty"`
+	HideFromAthlete    *bool                  `json:"hide_from_athlete,omitempty"`
+	AthleteCannotEdit  *bool                  `json:"athlete_cannot_edit,omitempty"`
 	TargetLoad         *float64               `json:"target_load,omitempty"`
 	DistanceMeters     *float64               `json:"distance_meters,omitempty"`
 	MovingTimeSeconds  *int                   `json:"moving_time_seconds,omitempty"`
@@ -190,6 +193,9 @@ func decodeAddOrUpdateEventRequest(raw json.RawMessage) (addOrUpdateEventRequest
 	if !validDate(args.Date) {
 		return args, errors.New("date must be athlete-local YYYY-MM-DD")
 	}
+	if err := intervals.ValidateEventEndDateLocal(args.Date, args.EndDateLocal); err != nil {
+		return args, err
+	}
 	if args.Category == "" {
 		return args, errors.New("category is required")
 	}
@@ -219,6 +225,7 @@ func eventWriteParams(args addOrUpdateEventRequest, options workoutdoc.Serialize
 		EventID:            args.EventID,
 		ExternalID:         args.ExternalID,
 		Date:               args.Date,
+		EndDateLocal:       args.EndDateLocal,
 		Category:           args.Category,
 		Type:               args.Type,
 		Name:               args.Name,
@@ -228,6 +235,8 @@ func eventWriteParams(args addOrUpdateEventRequest, options workoutdoc.Serialize
 		Color:              args.Color,
 		NotOnFitnessChart:  args.NotOnFitnessChart,
 		Indoor:             args.Indoor,
+		HideFromAthlete:    args.HideFromAthlete,
+		AthleteCannotEdit:  args.AthleteCannotEdit,
 		TargetLoad:         args.TargetLoad,
 		DistanceMeters:     args.DistanceMeters,
 		MovingTimeSeconds:  args.MovingTimeSeconds,
@@ -412,6 +421,27 @@ func eventMatchesWriteParams(event intervals.Event, params intervals.WriteEventP
 	} else if event.Indoor != nil && *event.Indoor {
 		return false
 	}
+	if params.EndDateLocal != nil {
+		if event.EndDateLocal == nil || strings.TrimSuffix(*event.EndDateLocal, "T00:00:00") != strings.TrimSuffix(*params.EndDateLocal, "T00:00:00") {
+			return false
+		}
+	} else if event.EndDateLocal != nil && len(*event.EndDateLocal) >= len(params.Date) && (*event.EndDateLocal)[:len(params.Date)] != params.Date {
+		return false
+	}
+	if params.HideFromAthlete != nil {
+		if event.HideFromAthlete == nil || *event.HideFromAthlete != *params.HideFromAthlete {
+			return false
+		}
+	} else if event.HideFromAthlete != nil && *event.HideFromAthlete {
+		return false
+	}
+	if params.AthleteCannotEdit != nil {
+		if event.AthleteCannotEdit == nil || *event.AthleteCannotEdit != *params.AthleteCannotEdit {
+			return false
+		}
+	} else if event.AthleteCannotEdit != nil && *event.AthleteCannotEdit {
+		return false
+	}
 	if params.TargetLoad != nil {
 		if !sameOptionalFloat(*params.TargetLoad, event.LoadTarget) {
 			return false
@@ -506,6 +536,7 @@ func addOrUpdateEventInputSchema() map[string]any {
 	examples := addOrUpdateEventInputExamples()
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"date", "category"}, "examples": examples, "input_examples": examples, "properties": map[string]any{
 		"date":                 map[string]any{"type": "string", "description": "Required athlete-local event date as YYYY-MM-DD; interpreted in the configured athlete timezone."},
+		"end_date_local":       map[string]any{"type": "string", "description": "Optional athlete-local end as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS. Must be on or after date. Omit on updates to preserve the existing end; do not send for ordinary single-day events."},
 		"event_id":             map[string]any{"type": "string", "description": "Optional upstream event ID to update. Omit to create a new event; this tool never deletes events."},
 		"external_id":          map[string]any{"type": "string", "description": "Optional non-empty upstream idempotency key. Surrounding whitespace is trimmed; omit or pass blank to leave external_id unchanged/unset. Clearing an existing upstream external_id is not supported."},
 		"category":             map[string]any{"type": "string", "description": intervals.EventCategoryReferenceDescription("Required upstream event category.")},
@@ -517,6 +548,8 @@ func addOrUpdateEventInputSchema() map[string]any {
 		"color":                map[string]any{"type": "string", "description": "Optional intervals.icu calendar display color. Omit on updates to leave unchanged; surrounding whitespace is trimmed."},
 		"not_on_fitness_chart": map[string]any{"type": "boolean", "description": "Optional intervals.icu flag that hides this event from the Fitness chart. Omit on updates to leave unchanged; set false explicitly to show it."},
 		"indoor":               map[string]any{"type": "boolean", "description": "Optional planned-event indoor/trainer flag. Set true for indoor trainer rides; commonly paired with type VirtualRide, but this boolean controls intervals.icu's Indoor toggle."},
+		"hide_from_athlete":    map[string]any{"type": "boolean", "description": "Coach visibility control. True hides this event from the athlete; false makes it visible. Omit on updates to preserve current visibility. Confirm the intended athlete visibility before writing."},
+		"athlete_cannot_edit":  map[string]any{"type": "boolean", "description": "Coach edit lock. True prevents the athlete from editing this event; false restores edit access. Omit on updates to preserve current editability. Confirm the intended athlete editability before writing."},
 		"target_load":          map[string]any{"type": "number", "minimum": 0, "description": "Optional planned training load / TSS equivalent when supported upstream."},
 		"distance_meters":      map[string]any{"type": "number", "minimum": 0, "description": "Optional planned distance in meters when supported upstream."},
 		"moving_time_seconds":  map[string]any{"type": "integer", "minimum": 0, "description": "Optional planned moving duration in seconds when supported upstream."},

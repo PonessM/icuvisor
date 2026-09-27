@@ -571,3 +571,60 @@ func TestAddOrUpdateEventRequiresWritableBasics(t *testing.T) {
 		t.Fatal("AddOrUpdateEvent() error = nil, want required category error")
 	}
 }
+
+func TestAddOrUpdateEventCalendarFieldsRoundTripAndSparseUpdate(t *testing.T) {
+	t.Parallel()
+
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/athlete/i12345/events/bulk" && r.URL.Path != "/athlete/i12345/events/123" {
+			t.Errorf("path = %q, want single-event create or numeric-ID update", r.URL.Path)
+		}
+		var body any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if batch, ok := body.([]any); ok {
+			body = batch[0]
+		}
+		requests = append(requests, body.(map[string]any))
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`[{"id":123,"category":"NOTE","start_date_local":"2026-07-10T00:00:00","end_date_local":"2026-07-12T16:00:00","hide_from_athlete":true,"athlete_cannot_edit":true}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":123,"category":"NOTE","start_date_local":"2026-07-10T00:00:00","hide_from_athlete":false,"athlete_cannot_edit":false}`))
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+	end := "2026-07-12T16:00:00"
+	trueValue, falseValue := true, false
+	created, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{Date: "2026-07-10", EndDateLocal: &end, Category: "NOTE", Name: "Stage race", HideFromAthlete: &trueValue, AthleteCannotEdit: &trueValue})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != "123" || created.EndDateLocal == nil || *created.EndDateLocal != end || created.HideFromAthlete == nil || !*created.HideFromAthlete || created.AthleteCannotEdit == nil || !*created.AthleteCannotEdit {
+		t.Fatalf("created event = %+v, want numeric ID and calendar fields", created)
+	}
+	updated, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{EventID: "123", Date: "2026-07-10", Category: "NOTE", HideFromAthlete: &falseValue, AthleteCannotEdit: &falseValue})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{EventID: "123", Date: "2026-07-10", Category: "NOTE", HideFromAthlete: &falseValue, AthleteCannotEdit: &falseValue}); err != nil {
+		t.Fatalf("identical retry: %v", err)
+	}
+	if updated.HideFromAthlete == nil || *updated.HideFromAthlete || updated.AthleteCannotEdit == nil || *updated.AthleteCannotEdit {
+		t.Fatalf("updated event = %+v, want explicit false flags", updated)
+	}
+	if len(requests) != 3 || requests[0]["end_date_local"] != end || requests[0]["hide_from_athlete"] != true || requests[0]["athlete_cannot_edit"] != true {
+		t.Fatalf("create requests = %#v", requests)
+	}
+	for _, request := range requests[1:] {
+		if _, ok := request["end_date_local"]; ok {
+			t.Fatalf("update sent omitted end date: %#v", request)
+		}
+		if request["hide_from_athlete"] != false || request["athlete_cannot_edit"] != false {
+			t.Fatalf("update did not send explicit false: %#v", request)
+		}
+	}
+}

@@ -113,6 +113,67 @@ func TestGetEventsTerseRowsTimezoneAndCategory(t *testing.T) {
 	}
 }
 
+func TestGetEventsMultiDayCoachFlagsAndSourceLoadsInTerseAndFull(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventsTrainingPlanClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Ride"}, FTP: 250}}}},
+		events: decodeToolEvents(t,
+			`{"id":123,"category":"RACE_A","type":"Ride","name":"Stage race","start_date_local":"2026-07-10T08:00:00","end_date_local":"2026-07-12T16:00:00","hide_from_athlete":false,"athlete_cannot_edit":true,"load_target":100,"icu_training_load":75,"workout_doc":{"steps":[{"duration":300,"power":{"value":220,"units":"WATTS"}},{"duration":300,"power":{"value":90,"units":"PERCENT_FTP"}}]}}`,
+			`{"id":124,"category":"NOTE","name":"Single day","start_date_local":"2026-07-10T00:00:00"}`,
+		),
+	}
+	tool := newGetEventsTool(client, client, "test", "UTC", false)
+	defaultResult, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"oldest":"2026-07-10","newest":"2026-07-12"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultPayload := resultMap(t, defaultResult)
+	defaultRace := rowsByEventID(defaultPayload["events"].([]any))["123"]
+	if defaultRace["end_date_local"] != "2026-07-12T16:00:00" || defaultRace["hide_from_athlete"] != false || defaultRace["athlete_cannot_edit"] != true {
+		t.Fatalf("default race = %#v, want multi-day span and coach flags", defaultRace)
+	}
+	if defaultPayload["_meta"].(map[string]any)["include_full"] != false {
+		t.Fatalf("default metadata = %#v, want include_full false", defaultPayload["_meta"])
+	}
+	for _, key := range []string{"full", "workout_doc"} {
+		if _, ok := defaultRace[key]; ok {
+			t.Fatalf("default race includes raw %s: %#v", key, defaultRace)
+		}
+	}
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"oldest":"2026-07-10","newest":"2026-07-12","include_full":true}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByEventID(resultMap(t, result)["events"].([]any))
+	race := rows["123"]
+	if race["end_date_local"] != "2026-07-12T16:00:00" || race["hide_from_athlete"] != false || race["athlete_cannot_edit"] != true {
+		t.Fatalf("race = %#v, want span and explicit coach flags", race)
+	}
+	if race["load_target"] != float64(100) || race["icu_training_load"] != float64(75) {
+		t.Fatalf("race loads = %#v, want separate planned and upstream actual event loads", race)
+	}
+	if _, ok := race["actual_minus_target_load"]; ok {
+		t.Fatalf("unsourced load delta in event row: %#v", race)
+	}
+	if _, ok := race["compliance_score"]; ok {
+		t.Fatalf("proprietary score in event row: %#v", race)
+	}
+	steps := race["full"].(map[string]any)["workout_doc"].(map[string]any)["steps"].([]any)
+	if got := steps[0].(map[string]any)["power"].(map[string]any)["units"]; got != "WATTS" {
+		t.Fatalf("absolute power units = %#v, want WATTS", got)
+	}
+	for _, preview := range race["workout_doc_summary"].(map[string]any)["target_previews"].([]any) {
+		if preview.(map[string]any)["path"] == "1" {
+			t.Fatalf("absolute watts step relabeled as percent FTP: %#v", preview)
+		}
+	}
+	for _, key := range []string{"end_date_local", "hide_from_athlete", "athlete_cannot_edit"} {
+		if _, ok := rows["124"][key]; ok {
+			t.Fatalf("single-day row includes absent %s: %#v", key, rows["124"])
+		}
+	}
+}
+
 func TestGetEventsKeepsWeightTrainingAsCalendarEventOnly(t *testing.T) {
 	t.Parallel()
 
