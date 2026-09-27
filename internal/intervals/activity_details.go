@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -97,7 +98,24 @@ func (i *ActivityInterval) UnmarshalJSON(data []byte) error {
 	// strings before decoding so the stable *string fields accept either shape;
 	// Raw keeps the original upstream values for full-payload responses.
 	normalized := data
-	if decodeRaw, coerced := coerceIntervalTimeFields(raw); coerced {
+	decodeRaw, changed := coerceIntervalTimeFields(raw)
+	for _, key := range []string{"start_distance", "end_distance", "distance", "duration", "average_power", "average_hr", "pace", "start_index", "end_index"} {
+		value, present := decodeRaw[key]
+		if !present || value == nil {
+			continue
+		}
+		number, numeric := value.(float64)
+		valid := numeric
+		if key == "start_index" || key == "end_index" {
+			maxInt := float64(int(^uint(0) >> 1))
+			valid = valid && math.Trunc(number) == number && number < maxInt && number >= -maxInt
+		}
+		if !valid {
+			delete(decodeRaw, key)
+			changed = true
+		}
+	}
+	if changed {
 		buf, err := json.Marshal(decodeRaw)
 		if err != nil {
 			return err

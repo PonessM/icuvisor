@@ -122,3 +122,23 @@ func TestIntervalsDTODecodesNumericIntervalTimes(t *testing.T) {
 		t.Errorf("Raw[end_time] = %#v, want numeric 240 for full-payload responses", got.Raw["end_time"])
 	}
 }
+
+func TestGetActivityIntervalsKeepsLapWhenOptionalNumberIsMalformed(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"a1","analyzed":true,"icu_intervals":[{"id":"lap-1","name":"Work","duration":240,"distance":1000,"average_hr":"N/A"},{"id":"lap-2","duration":180,"average_hr":151}],"icu_groups":[]}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+	dto, err := client.GetActivityIntervals(context.Background(), "a1")
+	if err != nil {
+		t.Fatalf("GetActivityIntervals() error = %v", err)
+	}
+	if len(dto.ICUIntervals) != 2 || dto.ICUIntervals[0].Duration == nil || *dto.ICUIntervals[0].Duration != 240 || dto.ICUIntervals[0].Distance == nil || *dto.ICUIntervals[0].Distance != 1000 || dto.ICUIntervals[0].AverageHR != nil || dto.ICUIntervals[1].AverageHR == nil || *dto.ICUIntervals[1].AverageHR != 151 {
+		t.Fatalf("intervals = %#v, want readable laps and only malformed HR omitted", dto.ICUIntervals)
+	}
+	if dto.ICUIntervals[0].Raw["average_hr"] != "N/A" {
+		t.Fatalf("raw malformed average_hr = %#v, want preserved", dto.ICUIntervals[0].Raw["average_hr"])
+	}
+}
