@@ -113,7 +113,7 @@ func TestGetEventsTerseRowsTimezoneAndCategory(t *testing.T) {
 	}
 }
 
-func TestGetEventsTerseMultiDayCoachFlagsAndSourceLoads(t *testing.T) {
+func TestGetEventsMultiDayCoachFlagsAndSourceLoadsInTerseAndFull(t *testing.T) {
 	t.Parallel()
 	client := &fakeEventsTrainingPlanClient{
 		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC", SportSettings: []intervals.SportSettings{{Types: []string{"Ride"}, FTP: 250}}}},
@@ -123,6 +123,23 @@ func TestGetEventsTerseMultiDayCoachFlagsAndSourceLoads(t *testing.T) {
 		),
 	}
 	tool := newGetEventsTool(client, client, "test", "UTC", false)
+	defaultResult, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"oldest":"2026-07-10","newest":"2026-07-12"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultPayload := resultMap(t, defaultResult)
+	defaultRace := rowsByEventID(defaultPayload["events"].([]any))["123"]
+	if defaultRace["end_date_local"] != "2026-07-12T16:00:00" || defaultRace["hide_from_athlete"] != false || defaultRace["athlete_cannot_edit"] != true {
+		t.Fatalf("default race = %#v, want multi-day span and coach flags", defaultRace)
+	}
+	if defaultPayload["_meta"].(map[string]any)["include_full"] != false {
+		t.Fatalf("default metadata = %#v, want include_full false", defaultPayload["_meta"])
+	}
+	for _, key := range []string{"full", "workout_doc"} {
+		if _, ok := defaultRace[key]; ok {
+			t.Fatalf("default race includes raw %s: %#v", key, defaultRace)
+		}
+	}
 	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"oldest":"2026-07-10","newest":"2026-07-12","include_full":true}`)})
 	if err != nil {
 		t.Fatal(err)
