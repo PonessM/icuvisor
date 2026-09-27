@@ -46,6 +46,26 @@ func TestGetEventByIDDetailSuccessUsesEventEnvelope(t *testing.T) {
 	}
 }
 
+func TestGetEventByIDTerseCalendarFlagsRoundTrip(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventsTrainingPlanClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC"}},
+		eventDetail:       decodeToolEvents(t, `{"id":123,"category":"NOTE","name":"Camp","start_date_local":"2026-07-10T00:00:00","end_date_local":"2026-07-12T16:00:00","hide_from_athlete":false,"athlete_cannot_edit":true}`)[0],
+	}
+	tool := newGetEventByIDTool(client, client, "test", "UTC", false)
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"event_id":"123"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := resultMap(t, result)["event"].(map[string]any)
+	if row["event_id"] != "123" || row["end_date_local"] != "2026-07-12T16:00:00" || row["hide_from_athlete"] != false || row["athlete_cannot_edit"] != true {
+		t.Fatalf("detail row = %#v, want multi-day event and explicit flags", row)
+	}
+	if _, ok := row["full"]; ok {
+		t.Fatalf("terse detail leaked raw payload: %#v", row)
+	}
+}
+
 func TestGetEventByIDFallbackScansDateWindowWithResolveAndCap(t *testing.T) {
 	t.Parallel()
 

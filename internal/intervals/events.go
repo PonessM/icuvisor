@@ -29,6 +29,7 @@ type WriteEventParams struct {
 	EventID            string
 	ExternalID         string
 	Date               string
+	EndDateLocal       *string
 	Category           string
 	Type               string
 	Name               string
@@ -38,6 +39,8 @@ type WriteEventParams struct {
 	Color              *string
 	NotOnFitnessChart  *bool
 	Indoor             *bool
+	HideFromAthlete    *bool
+	AthleteCannotEdit  *bool
 	TargetLoad         *float64
 	DistanceMeters     *float64
 	MovingTimeSeconds  *int
@@ -59,6 +62,8 @@ type Event struct {
 	PlanApplied       *string  `json:"plan_applied"`
 	Description       *string  `json:"description"`
 	Indoor            *bool    `json:"indoor"`
+	HideFromAthlete   *bool    `json:"hide_from_athlete"`
+	AthleteCannotEdit *bool    `json:"athlete_cannot_edit"`
 	Color             *string  `json:"color"`
 	NotOnFitnessChart *bool    `json:"not_on_fitness_chart"`
 	TrainingLoad      *float64 `json:"icu_training_load"`
@@ -162,6 +167,7 @@ func (c *Client) AddOrUpdateEvent(ctx context.Context, params WriteEventParams) 
 
 type writeEventPayload struct {
 	StartDateLocal    string    `json:"start_date_local"`
+	EndDateLocal      *string   `json:"end_date_local,omitempty"`
 	ExternalID        string    `json:"external_id,omitempty"`
 	Category          string    `json:"category"`
 	Type              string    `json:"type,omitempty"`
@@ -171,6 +177,8 @@ type writeEventPayload struct {
 	Color             *string   `json:"color,omitempty"`
 	NotOnFitnessChart *bool     `json:"not_on_fitness_chart,omitempty"`
 	Indoor            *bool     `json:"indoor,omitempty"`
+	HideFromAthlete   *bool     `json:"hide_from_athlete,omitempty"`
+	AthleteCannotEdit *bool     `json:"athlete_cannot_edit,omitempty"`
 	LoadTarget        *float64  `json:"load_target,omitempty"`
 	DistanceTarget    *float64  `json:"distance_target,omitempty"`
 	TimeTarget        *int      `json:"time_target,omitempty"`
@@ -186,6 +194,9 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 	if category == "" {
 		return writeEventPayload{}, fmt.Errorf("writing event: category is required")
 	}
+	if err := ValidateEventEndDateLocal(date, params.EndDateLocal); err != nil {
+		return writeEventPayload{}, fmt.Errorf("writing event: %w", err)
+	}
 	color := params.Color
 	if color != nil {
 		trimmed := strings.TrimSpace(*color)
@@ -193,6 +204,7 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 	}
 	body := writeEventPayload{
 		StartDateLocal:    writeEventStartDateLocal(date, category),
+		EndDateLocal:      params.EndDateLocal,
 		ExternalID:        strings.TrimSpace(params.ExternalID),
 		Category:          category,
 		Type:              strings.TrimSpace(params.Type),
@@ -201,6 +213,8 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 		Color:             color,
 		NotOnFitnessChart: params.NotOnFitnessChart,
 		Indoor:            params.Indoor,
+		HideFromAthlete:   params.HideFromAthlete,
+		AthleteCannotEdit: params.AthleteCannotEdit,
 		LoadTarget:        params.TargetLoad,
 		DistanceTarget:    params.DistanceMeters,
 		TimeTarget:        params.MovingTimeSeconds,
@@ -211,6 +225,28 @@ func writeEventBody(params WriteEventParams) (writeEventPayload, error) {
 		body.Tags = &tags
 	}
 	return body, nil
+}
+
+// ValidateEventEndDateLocal checks the athlete-local end shape and ordering.
+func ValidateEventEndDateLocal(start string, end *string) error {
+	if end == nil {
+		return nil
+	}
+	startTime, err := time.Parse(time.DateOnly, start)
+	if err != nil {
+		return fmt.Errorf("date must be athlete-local YYYY-MM-DD: %w", err)
+	}
+	endTime, err := time.Parse(time.DateOnly, *end)
+	if err != nil {
+		endTime, err = time.Parse("2006-01-02T15:04:05", *end)
+		if err != nil {
+			return fmt.Errorf("end_date_local must be athlete-local YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS: %w", err)
+		}
+	}
+	if endTime.Before(startTime) {
+		return fmt.Errorf("end_date_local must be on or after date")
+	}
+	return nil
 }
 
 func writeEventStartDateLocal(date string, category string) string {

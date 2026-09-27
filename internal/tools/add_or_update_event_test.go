@@ -661,12 +661,123 @@ func TestAddOrUpdateEventRegistrationMetadata(t *testing.T) {
 		t.Fatalf("description = %q, want non-destructive language without confirm", tool.Description)
 	}
 	props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
-	for _, name := range []string{"date", "event_id", "external_id", "category", "type", "name", "description", "workout_doc", "tags", "color", "not_on_fitness_chart", "indoor", "target_load", "distance_meters", "moving_time_seconds", "elapsed_time_seconds"} {
+	for _, name := range []string{"date", "end_date_local", "event_id", "external_id", "category", "type", "name", "description", "workout_doc", "tags", "color", "not_on_fitness_chart", "indoor", "hide_from_athlete", "athlete_cannot_edit", "target_load", "distance_meters", "moving_time_seconds", "elapsed_time_seconds"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("schema missing %s", name)
 		}
 	}
 }
+
+func TestAddOrUpdateEventCalendarFieldsAreSparseAndReversible(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC"}},
+		event:             decodeToolEvents(t, `{"id":123,"category":"NOTE","name":"Camp","start_date_local":"2026-07-10T00:00:00","end_date_local":"2026-07-12T16:00:00","hide_from_athlete":false,"athlete_cannot_edit":false}`)[0],
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+	for _, tc := range []struct {
+		name string
+		args string
+		end  *string
+		hide *bool
+		lock *bool
+	}{
+		{name: "set", args: `{"event_id":"123","date":"2026-07-10","category":"NOTE","end_date_local":"2026-07-12T16:00:00","hide_from_athlete":true,"athlete_cannot_edit":true}`, end: calendarStringPtr("2026-07-12T16:00:00"), hide: calendarBoolPtr(true), lock: calendarBoolPtr(true)},
+		{name: "reverse", args: `{"event_id":"123","date":"2026-07-10","category":"NOTE","hide_from_athlete":false,"athlete_cannot_edit":false}`, hide: calendarBoolPtr(false), lock: calendarBoolPtr(false)},
+		{name: "omit", args: `{"event_id":"123","date":"2026-07-10","category":"NOTE"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(tc.args)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := client.calls[len(client.calls)-1]
+			if !reflect.DeepEqual(call.EndDateLocal, tc.end) || !reflect.DeepEqual(call.HideFromAthlete, tc.hide) || !reflect.DeepEqual(call.AthleteCannotEdit, tc.lock) {
+				t.Fatalf("params = %+v, want end=%v hide=%v lock=%v", call, tc.end, tc.hide, tc.lock)
+			}
+			row := resultMap(t, result)["event"].(map[string]any)
+			if row["event_id"] != "123" || row["end_date_local"] != "2026-07-12T16:00:00" || row["hide_from_athlete"] != false || row["athlete_cannot_edit"] != false {
+				t.Fatalf("row = %#v, want numeric ID, span, explicit false flags", row)
+			}
+		})
+	}
+}
+
+func TestAddOrUpdateEventRejectsInvalidEndDateBeforeWrite(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventWriterClient{fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC"}}}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+	for _, tc := range []struct{ name, end string }{
+		{name: "before start", end: "2026-07-09"},
+		{name: "invalid date", end: "2026-02-30"},
+		{name: "utc timestamp", end: "2026-07-12T16:00:00Z"},
+		{name: "offset timestamp", end: "2026-07-12T16:00:00-03:00"},
+		{name: "blank", end: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]any{"date": "2026-07-10", "category": "NOTE", "name": "Camp", "end_date_local": tc.end})
+			if _, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: args}); err == nil {
+				t.Fatalf("end %q accepted", tc.end)
+			}
+		})
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("writes = %#v, want none", client.calls)
+	}
+}
+
+func TestAddOrUpdateEventMultiDayCreateRetryMatchesNormalizedEndAndFlags(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC"}},
+		events:            decodeToolEvents(t, `{"id":123,"category":"RACE_A","type":"Ride","name":"Stage race","start_date_local":"2026-07-10T00:00:00","end_date_local":"2026-07-12T00:00:00","hide_from_athlete":true,"athlete_cannot_edit":false}`),
+		event:             decodeToolEvents(t, `{"id":124,"category":"RACE_A","type":"Ride","name":"Stage race","start_date_local":"2026-07-10T00:00:00","end_date_local":"2026-07-13T00:00:00","hide_from_athlete":true,"athlete_cannot_edit":false}`)[0],
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+	request := json.RawMessage(`{"date":"2026-07-10","end_date_local":"2026-07-12","category":"RACE_A","type":"Ride","name":"Stage race","hide_from_athlete":true,"athlete_cannot_edit":false}`)
+	for attempt := 0; attempt < 2; attempt++ {
+		result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: request})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := resultMap(t, result)["_meta"].(map[string]any)["confirmation_status"]; got != skippedExistingEventStatus {
+			t.Fatalf("retry %d confirmation = %#v, want skipped duplicate", attempt, got)
+		}
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("writes = %#v, want normalized multi-day duplicate skipped", client.calls)
+	}
+	request = json.RawMessage(`{"date":"2026-07-10","end_date_local":"2026-07-13","category":"RACE_A","type":"Ride","name":"Stage race","hide_from_athlete":true,"athlete_cannot_edit":false}`)
+	if _, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: request}); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("writes = %#v, want changed end date to create separate event", client.calls)
+	}
+}
+
+func TestAddOrUpdateEventWritesAbsolutePowerAsWatts(t *testing.T) {
+	t.Parallel()
+	client := &fakeEventWriterClient{
+		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", Timezone: "UTC"}},
+		event:             decodeToolEvents(t, `{"id":123,"category":"WORKOUT","type":"Ride","start_date_local":"2026-07-10T00:00:00","workout_doc":{"steps":[{"duration":300,"power":{"value":220,"units":"WATTS"}}]}}`)[0],
+	}
+	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-07-10","category":"WORKOUT","type":"Ride","workout_doc":{"steps":[{"duration":300,"power":{"value":220,"units":"WATTS"}}]}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.calls) != 1 || client.calls[0].Description == nil || !strings.Contains(*client.calls[0].Description, "220w") || strings.Contains(*client.calls[0].Description, "%") {
+		t.Fatalf("workout DSL = %#v, want absolute 220w with no percent", client.calls)
+	}
+	row := resultMap(t, result)["event"].(map[string]any)
+	if summary := row["workout_doc_summary"].(map[string]any); summary["target_previews"] != nil {
+		t.Fatalf("absolute watt step should not be projected as FTP percentage: %#v", summary)
+	}
+}
+
+func calendarStringPtr(value string) *string { return &value }
+func calendarBoolPtr(value bool) *bool       { return &value }
 
 func readWorkoutDocFixture(t *testing.T, name string) workoutdoc.WorkoutDoc {
 	t.Helper()
