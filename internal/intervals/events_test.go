@@ -184,21 +184,57 @@ func TestGetEventRequiresID(t *testing.T) {
 	}
 }
 
-func TestWriteEventBodyAppendsMidnightForAllCategories(t *testing.T) {
+func TestWriteEventBodyNormalizesDateOnlyAndPreservesTimestamp(t *testing.T) {
 	t.Parallel()
 
-	for _, category := range []string{"WORKOUT", "NOTE", "RACE_A", "RACE_B", "RACE_C", "PLAN", "HOLIDAY", "SICK"} {
-		t.Run(category, func(t *testing.T) {
+	cases := []struct {
+		name string
+		date string
+		want string
+	}{
+		{name: "date only", date: "2027-01-01", want: "2027-01-01T00:00:00"},
+		{name: "full timestamp", date: "2027-01-01T09:30:00", want: "2027-01-01T09:30:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			body, err := writeEventBody(WriteEventParams{Date: "2027-01-01", Category: category})
+			body, err := writeEventBody(WriteEventParams{Date: tc.date, Category: "RACE_A"})
 			if err != nil {
 				t.Fatalf("writeEventBody() error = %v", err)
 			}
-			if body.StartDateLocal != "2027-01-01T00:00:00" {
-				t.Fatalf("start_date_local = %q, want date-only value with appended midnight time", body.StartDateLocal)
+			if body.StartDateLocal != tc.want {
+				t.Fatalf("start_date_local = %q, want %q", body.StartDateLocal, tc.want)
 			}
 		})
+	}
+}
+
+func TestAddOrUpdateEventSendsRaceCreateAtLocalMidnight(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Method, http.MethodPost; got != want {
+			t.Fatalf("method = %q, want %q", got, want)
+		}
+		if got, want := r.URL.Path, "/athlete/i12345/events/bulk"; got != want {
+			t.Fatalf("path = %q, want %q", got, want)
+		}
+		var batch []map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(batch) != 1 || batch[0]["category"] != "RACE_A" || batch[0]["start_date_local"] != "2027-01-01T00:00:00" {
+			t.Fatalf("request body = %#v, want RACE_A at local midnight", batch)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"race-1","category":"RACE_A","start_date_local":"2027-01-01T00:00:00"}]`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+	if _, err := client.AddOrUpdateEvent(context.Background(), WriteEventParams{Date: "2027-01-01", Category: "RACE_A", Name: "Goal race"}); err != nil {
+		t.Fatalf("AddOrUpdateEvent(RACE_A create) error = %v", err)
 	}
 }
 
