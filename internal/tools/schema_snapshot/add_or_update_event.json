@@ -231,6 +231,10 @@
     }
   ],
   "properties": {
+    "athlete_cannot_edit": {
+      "description": "Coach edit lock. True prevents the athlete from editing this event; false restores edit access. Omit on updates to preserve current editability. Confirm the intended athlete editability before writing.",
+      "type": "boolean"
+    },
     "athlete_id": {
       "description": "Target athlete; defaults to selected athlete in coach mode, or the only athlete otherwise. Format: i12345 or 12345.",
       "type": "string"
@@ -261,6 +265,10 @@
       "minimum": 0,
       "type": "integer"
     },
+    "end_date_local": {
+      "description": "Optional athlete-local end as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS. Must be on or after date. Omit on updates to preserve the existing end; do not send for ordinary single-day events.",
+      "type": "string"
+    },
     "event_id": {
       "description": "Optional upstream event ID to update. Omit to create a new event; this tool never deletes events.",
       "type": "string"
@@ -268,6 +276,10 @@
     "external_id": {
       "description": "Optional non-empty upstream idempotency key. Surrounding whitespace is trimmed; omit or pass blank to leave external_id unchanged/unset. Clearing an existing upstream external_id is not supported.",
       "type": "string"
+    },
+    "hide_from_athlete": {
+      "description": "Coach visibility control. True hides this event from the athlete; false makes it visible. Omit on updates to preserve current visibility. Confirm the intended athlete visibility before writing.",
+      "type": "boolean"
     },
     "include_full": {
       "default": false,
