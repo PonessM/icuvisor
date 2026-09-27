@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `get_activity_details` now preserves the upstream activity description, including an explicit empty string, and returns compact native running-dynamics values with per-field provenance and malformed-value diagnostics without widening activity-list rows.
+- `get_activity_streams` now treats `latlng` as a paired latitude/longitude stream, labels both axes, applies the same window and downsampling indexes to each channel, and withholds mismatched or invalid pairs with actionable diagnostics.
+- Calendar event reads and `add_or_update_event` now round-trip multi-day `end_date_local` values plus the coach controls `hide_from_athlete` and `athlete_cannot_edit`, including explicit `false` updates.
+
 ### Fixed
 
+- Malformed optional numeric values on one activity interval no longer discard the whole interval; valid fields remain available while raw evidence stays behind `include_full: true`.
 - Calendar event writes now report occupied-date reschedule conflicts, reconcile interrupted creates with a bounded same-day verification read, and keep unverified writes as terse actionable errors. Activity/event linking now skips verified retries, refuses to overwrite a different pairing, and verifies new links before reporting success.
 - Added fixture-backed calendar reconciliation contracts for same-day distinct sessions, planned/completed linking, provider duplicates, positive/negative timezone offsets and DST, multi-day races, retry idempotency, and interrupted writes.
 - Hardened structured-workout round trips across sports: absolute swim pace targets now preserve seconds-per-100-metre/yard ranges, target previews require exact sport settings and report missing FTP/CSS/zone context, conflicting primary targets and invalid zone/range boundaries fail explicitly, and workout-library writes enumerate upstream lossy fields.
