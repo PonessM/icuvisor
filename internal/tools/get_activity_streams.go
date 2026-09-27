@@ -151,6 +151,8 @@ type getActivityStreamsUnavailableResponse struct {
 type activityStreamRow struct {
 	Type                string                          `json:"type,omitempty"`
 	Name                string                          `json:"name,omitempty"`
+	SamplesAxis         string                          `json:"samples_axis,omitempty"`
+	Data2Axis           string                          `json:"data2_axis,omitempty"`
 	Samples             []float64                       `json:"samples,omitempty"`
 	Data2               []float64                       `json:"data2,omitempty"`
 	SampleCount         int                             `json:"sample_count,omitempty"`
@@ -339,31 +341,36 @@ func canonicalStreamKeys(keys []string) ([]string, []string) {
 	return canonical, unknown
 }
 
-func uniformlySampleStreamSeries(values []float64, maxPoints int) ([]float64, bool) {
-	if maxPoints == 0 || maxPoints >= len(values) {
-		return values, false
+func sampleActivityStreamChannels(data, data2 []float64, data2Present bool, maxPoints int) ([]float64, []float64, bool) {
+	if maxPoints == 0 || maxPoints >= len(data) {
+		return data, data2, false
 	}
-	sampled := make([]float64, maxPoints)
-	lastIndex := len(values) - 1
-	for i := range sampled {
+	samples := make([]float64, maxPoints)
+	var paired []float64
+	if data2Present {
+		paired = make([]float64, maxPoints)
+	}
+	lastIndex := len(data) - 1
+	for i := range samples {
 		index := int(math.Round(float64(i) * float64(lastIndex) / float64(maxPoints-1)))
-		sampled[i] = values[index]
+		samples[i] = data[index]
+		if data2Present {
+			paired[i] = data2[index]
+		}
 	}
-	return sampled, true
+	return samples, paired, true
 }
 
-func sampledActivityStreamRaw(raw map[string]any, samples []float64, data2 []float64, samplesReduced bool, data2Reduced bool) map[string]any {
-	if raw == nil || (!samplesReduced && !data2Reduced) {
+func sampledActivityStreamRaw(raw map[string]any, samples, data2 []float64, data2Present, reduced bool) map[string]any {
+	if raw == nil || !reduced {
 		return raw
 	}
 	rawCopy := make(map[string]any, len(raw))
 	for key, value := range raw {
 		rawCopy[key] = value
 	}
-	if samplesReduced {
-		rawCopy["data"] = samples
-	}
-	if data2Reduced {
+	rawCopy["data"] = samples
+	if data2Present {
 		rawCopy["data2"] = data2
 	}
 	return rawCopy
@@ -586,6 +593,32 @@ func streamHasData2(row intervals.ActivityStream) bool {
 	return row.Data2 != nil
 }
 
+func invalidActivityStreamChannels(stream intervals.ActivityStream) (string, string) {
+	if rawArrayHasNull(stream.Raw, "data") {
+		return "channel_null", "The stream data contains null values; samples were withheld. Check the upstream recording."
+	}
+	for _, value := range stream.Data {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return "channel_non_finite", "The stream data contains non-finite values; samples were withheld. Check the upstream recording."
+		}
+	}
+	if !streamHasData2(stream) {
+		return "", ""
+	}
+	if rawArrayHasNull(stream.Raw, "data2") {
+		return "channel_null", "The paired data2 channel contains null values; samples were withheld to preserve alignment. Check the upstream recording."
+	}
+	if len(stream.Data2) != len(stream.Data) {
+		return "channel_length_mismatch", "The paired data2 channel length differs from data; samples were withheld to preserve alignment. Check the upstream recording."
+	}
+	for _, value := range stream.Data2 {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return "channel_non_finite", "The paired data2 channel contains non-finite values; samples were withheld to preserve alignment. Check the upstream recording."
+		}
+	}
+	return "", ""
+}
+
 func windowDiagnostic(reason, requested, message string) *dataAvailabilityDiagnostic {
 	return &dataAvailabilityDiagnostic{Reason: reason, Requested: []string{requested}, Message: message}
 }
@@ -630,23 +663,30 @@ func shapeActivityStreams(activityID string, rows []intervals.ActivityStream, re
 			continue
 		}
 		row := activityStreamRow{Type: streamRow.Type, Name: streamRow.Name, AllNull: streamRow.AllNull, Custom: streamRow.Custom}
+		if key == "latlng" {
+			row.SamplesAxis = "latitude_degrees"
+			row.Data2Axis = "longitude_degrees"
+		}
 		if selection == nil {
-			var samplesReduced, data2Reduced bool
-			if samples {
-				row.Samples, samplesReduced = uniformlySampleStreamSeries(streamRow.Data, maxPoints)
-				row.Data2, data2Reduced = uniformlySampleStreamSeries(streamRow.Data2, maxPoints)
-				if maxPoints != 0 && (samplesReduced || data2Reduced) {
-					row.SampleCount = len(streamRow.Data)
-					row.ReturnedSampleCount = streamCountPointer(len(row.Samples))
-					if len(streamRow.Data2) > len(streamRow.Data) {
-						row.SampleCount = len(streamRow.Data2)
-						row.ReturnedSampleCount = streamCountPointer(len(row.Data2))
+			if reason, message := invalidActivityStreamChannels(streamRow); reason != "" {
+				row.SampleCount = len(streamRow.Data)
+				row.ReturnedSampleCount = streamCountPointer(0)
+				row.SamplingMethod = "unavailable"
+				out.Meta.DataAvailability = append(out.Meta.DataAvailability, dataAvailabilityDiagnostic{Reason: reason, Requested: []string{key}, Message: message})
+			} else {
+				data2Present := streamHasData2(streamRow)
+				var reduced bool
+				if samples {
+					row.Samples, row.Data2, reduced = sampleActivityStreamChannels(streamRow.Data, streamRow.Data2, data2Present, maxPoints)
+					if reduced {
+						row.SampleCount = len(streamRow.Data)
+						row.ReturnedSampleCount = streamCountPointer(len(row.Samples))
+						row.SamplingMethod = "uniform_index"
 					}
-					row.SamplingMethod = "uniform_index"
 				}
-			}
-			if includeFull {
-				row.Full = sampledActivityStreamRaw(streamRow.Raw, row.Samples, row.Data2, samplesReduced, data2Reduced)
+				if includeFull {
+					row.Full = sampledActivityStreamRaw(streamRow.Raw, row.Samples, row.Data2, data2Present, reduced)
+				}
 			}
 		} else {
 			diagnostic := shapeWindowedActivityStream(&row, streamRow, selection, samples, includeFull, maxPoints)
@@ -688,6 +728,13 @@ func shapeWindowedActivityStream(row *activityStreamRow, stream intervals.Activi
 	if data2Present && len(stream.Data2) != selection.BoundaryLength {
 		return windowDiagnostic("window_channel_length_mismatch", firstNonEmpty(stream.Type, stream.Name), "The requested data2 channel length does not match the boundary stream; the channel was withheld to preserve alignment.")
 	}
+	for _, values := range [][]float64{stream.Data, stream.Data2} {
+		for _, value := range values {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return windowDiagnostic("window_channel_non_finite", firstNonEmpty(stream.Type, stream.Name), "The requested stream contains non-finite values and was withheld to preserve alignment. Check the upstream recording.")
+			}
+		}
+	}
 	if rawArrayHasNullAt(stream.Raw, "data", selection.Indexes) || rawArrayHasNullAt(stream.Raw, "data2", selection.Indexes) {
 		return windowDiagnostic("window_channel_null", firstNonEmpty(stream.Type, stream.Name), "The requested stream contains null samples and was withheld to avoid converting nulls into zeros.")
 	}
@@ -697,13 +744,8 @@ func shapeWindowedActivityStream(row *activityStreamRow, stream intervals.Activi
 		selectedData2 = selectActivityStreamValues(stream.Data2, selection.Indexes)
 	}
 	row.SelectedSampleCount = streamCountPointer(len(selected))
-	returned := selected
-	returnedData2 := selectedData2
-	if maxPoints > 0 {
-		returned, _ = uniformlySampleStreamSeries(selected, maxPoints)
-		returnedData2, _ = uniformlySampleStreamSeries(selectedData2, maxPoints)
-	}
-	if len(selected) > maxPoints && maxPoints > 0 {
+	returned, returnedData2, reduced := sampleActivityStreamChannels(selected, selectedData2, data2Present, maxPoints)
+	if reduced {
 		row.SamplingMethod = "uniform_index"
 	} else {
 		row.SamplingMethod = "window"
