@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"os"
 	"strings"
 	"testing"
 
@@ -35,7 +36,18 @@ func assertLatlngAxes(t *testing.T, row map[string]any) {
 
 func TestGetActivityStreamsLatlngFullAndTerse(t *testing.T) {
 	t.Parallel()
-	rows := []string{`{"type":"LatLng","data":[-23.5,-23.6],"data2":[-46.6,-46.7],"source":"gps"}`}
+	fixture, err := os.ReadFile("testdata/activity_streams/latlng_response.json")
+	if err != nil {
+		t.Fatalf("read latlng response fixture: %v", err)
+	}
+	var rawRows []json.RawMessage
+	if err := json.Unmarshal(fixture, &rawRows); err != nil {
+		t.Fatalf("decode latlng response fixture: %v", err)
+	}
+	rows := make([]string, len(rawRows))
+	for i, raw := range rawRows {
+		rows[i] = string(raw)
+	}
 	for _, tc := range []struct {
 		name string
 		args string
@@ -65,6 +77,56 @@ func TestGetActivityStreamsLatlngFullAndTerse(t *testing.T) {
 			full := row["full"].(map[string]any)
 			if full["source"] != "gps" || !equalFloatSlices(full["data"].([]any), []float64{-23.5, -23.6}) || !equalFloatSlices(full["data2"].([]any), []float64{-46.6, -46.7}) {
 				t.Fatalf("full upstream evidence = %#v", full)
+			}
+		})
+	}
+}
+
+func TestGetActivityStreamsLatlngWindowIgnoresNonFiniteOutsideSelection(t *testing.T) {
+	t.Parallel()
+	rows := []intervals.ActivityStream{
+		{Type: "time", Data: []float64{0, 10, 20, 30}},
+		{Type: "LatLng", Data: []float64{math.NaN(), 1, 2, 3}, Data2: []float64{4, 5, 6, math.Inf(1)}},
+	}
+	for _, tc := range []struct {
+		name string
+		args string
+	}{
+		{name: "windowed safe pairs", args: `{"activity_id":"a1","keys":["latlng"],"include_full":true,"time_window":{"start":10,"end":20}}`},
+		{name: "unwindowed whole channel", args: `{"activity_id":"a1","keys":["latlng"],"include_full":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeActivityReadClient{streams: rows}
+			tool := newGetActivityStreamsTool(client, client, "test", false)
+			result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(tc.args)})
+			if err != nil {
+				t.Fatalf("Handler() error = %v", err)
+			}
+			payload := resultMap(t, result)
+			row := latlngStream(t, payload)
+			if tc.name == "windowed safe pairs" {
+				lat, latOK := row["samples"].([]any)
+				lon, lonOK := row["data2"].([]any)
+				if !latOK || !lonOK || !equalFloatSlices(lat, []float64{1, 2}) || !equalFloatSlices(lon, []float64{5, 6}) {
+					t.Fatalf("windowed pairs = %#v", row)
+				}
+				full := row["full"].(map[string]any)
+				if !equalFloatSlices(full["data"].([]any), []float64{1, 2}) || !equalFloatSlices(full["data2"].([]any), []float64{5, 6}) {
+					t.Fatalf("windowed full pairs = %#v", full)
+				}
+				if _, ok := payload["_meta"].(map[string]any)["data_availability"]; ok {
+					t.Fatalf("safe selected pairs have diagnostic: %#v", payload["_meta"])
+				}
+				return
+			}
+			for _, key := range []string{"samples", "data2", "full"} {
+				if _, ok := row[key]; ok {
+					t.Fatalf("unwindowed %s exposed: %#v", key, row)
+				}
+			}
+			diagnostics := payload["_meta"].(map[string]any)["data_availability"].([]any)
+			if len(diagnostics) != 1 || diagnostics[0].(map[string]any)["reason"] != "channel_non_finite" {
+				t.Fatalf("unwindowed diagnostics = %#v", diagnostics)
 			}
 		})
 	}

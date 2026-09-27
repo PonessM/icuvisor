@@ -728,8 +728,13 @@ func shapeWindowedActivityStream(row *activityStreamRow, stream intervals.Activi
 	if data2Present && len(stream.Data2) != selection.BoundaryLength {
 		return windowDiagnostic("window_channel_length_mismatch", firstNonEmpty(stream.Type, stream.Name), "The requested data2 channel length does not match the boundary stream; the channel was withheld to preserve alignment.")
 	}
-	for _, values := range [][]float64{stream.Data, stream.Data2} {
-		for _, value := range values {
+	for _, index := range selection.Indexes {
+		value := stream.Data[index]
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return windowDiagnostic("window_channel_non_finite", firstNonEmpty(stream.Type, stream.Name), "The requested stream contains non-finite values and was withheld to preserve alignment. Check the upstream recording.")
+		}
+		if data2Present {
+			value = stream.Data2[index]
 			if math.IsNaN(value) || math.IsInf(value, 0) {
 				return windowDiagnostic("window_channel_non_finite", firstNonEmpty(stream.Type, stream.Name), "The requested stream contains non-finite values and was withheld to preserve alignment. Check the upstream recording.")
 			}
