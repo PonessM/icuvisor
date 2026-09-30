@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-09-30
+
 ### Fixed
 
 - Activity streams now isolate nonnumeric or malformed optional channels, report safe channel/fetch diagnostics, and avoid adding default channels to explicit stream and split requests (#64).
@@ -481,7 +483,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/ricardocabral/icuvisor/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/ricardocabral/icuvisor/compare/v1.6.5...v1.7.0
 [1.6.5]: https://github.com/ricardocabral/icuvisor/compare/v1.6.4...v1.6.5
 [1.6.4]: https://github.com/ricardocabral/icuvisor/compare/v1.6.3...v1.6.4
