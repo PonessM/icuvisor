@@ -3,9 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/ricardocabral/icuvisor/internal/config"
 	"github.com/ricardocabral/icuvisor/internal/intervals"
 )
 
@@ -264,4 +268,113 @@ func equalFloatSlices(got []any, want []float64) bool {
 		}
 	}
 	return true
+}
+
+func TestActivityStreamToolsWithUpstreamAnomaliesAndHeartRateNames(t *testing.T) {
+	t.Parallel()
+	fixture, err := os.ReadFile("testdata/activity_streams_anomalies.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal(fixture, &rows); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/athlete/i12345":
+			_, _ = w.Write([]byte(`{"id":"i12345","preferred_units":"metric"}`))
+		case "/activity/run-1":
+			_, _ = w.Write([]byte(`{"id":"run-1","type":"Run"}`))
+		case "/activity/run-1/intervals":
+			_, _ = w.Write([]byte(`{"icu_intervals":[]}`))
+		case "/activity/run-1/streams":
+			types := r.URL.Query().Get("types")
+			selected := strings.Split(types, ",")
+			for _, key := range selected {
+				if key == "heart_rate" {
+					http.Error(w, "unknown stream type", http.StatusBadRequest)
+					return
+				}
+			}
+			var out []json.RawMessage
+			for _, row := range rows {
+				var channel struct {
+					Type string `json:"type"`
+				}
+				if err := json.Unmarshal(row, &channel); err != nil {
+					t.Error(err)
+					return
+				}
+				include := types == "" || r.URL.Query().Get("includeDefaults") == "true"
+				for _, key := range selected {
+					if key == channel.Type {
+						include = true
+					}
+				}
+				if include {
+					out = append(out, row)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := intervals.NewClient(intervals.Options{Config: config.Config{APIKey: "test-key", AthleteID: "i12345", APIBaseURL: server.URL}, HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		tool Tool
+		args string
+	}{
+		{"segment control", newComputeActivitySegmentStatsTool(client, "test", false), `{"activity_id":"run-1","stat":"mean","metric":"heart_rate","start_seconds":0,"end_seconds":240}`},
+		{"streams", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1"}`},
+		{"filtered streams", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1","keys":["heart_rate"],"include_full":true}`},
+		{"histogram", newGetActivityHistogramTool(client, client, client, "test", false), `{"activity_id":"run-1","metric":"heart_rate_bpm"}`},
+		{"splits", newGetActivitySplitsTool(client, client, client, client, "test", false), `{"activity_id":"run-1","split_unit":"km"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tc.tool.Handler(context.Background(), Request{Arguments: json.RawMessage(tc.args)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := resultMap(t, result)
+			if payload["unavailable"] != nil {
+				t.Fatalf("unexpected unavailable: %s", resultText(t, result))
+			}
+			switch tc.name {
+			case "segment control":
+				if payload["result"].(map[string]any)["value"] != float64(120) {
+					t.Fatalf("mean = %#v", payload)
+				}
+			case "streams", "filtered streams":
+				hr := payload["streams"].(map[string]any)["heart_rate"].(map[string]any)
+				if hr["type"] != "heartrate" {
+					t.Fatalf("HR metadata = %#v", hr)
+				}
+				if tc.name == "filtered streams" {
+					if !equalFloatSlices(hr["samples"].([]any), []float64{100, 110, 130, 140}) {
+						t.Fatalf("HR samples = %#v", hr)
+					}
+				} else if _, ok := hr["samples"]; ok {
+					t.Fatalf("terse response includes samples: %#v", hr)
+				}
+			case "histogram":
+				if len(payload["buckets"].([]any)) == 0 {
+					t.Fatalf("empty histogram: %#v", payload)
+				}
+			case "splits":
+				splits := payload["splits"].([]any)
+				if len(splits) != 2 || splits[0].(map[string]any)["average_heart_rate_bpm"] != float64(110) {
+					t.Fatalf("splits = %#v", splits)
+				}
+			}
+		})
+	}
 }

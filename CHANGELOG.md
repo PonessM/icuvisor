@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Activity stream reads now decode upstream anomaly objects and translate canonical heart-rate keys to `heartrate`, preventing false unavailable responses in stream metadata, histograms, and splits (#64).
 - Malformed optional numeric values on one activity interval no longer discard the whole interval; valid fields remain available while raw evidence stays behind `include_full: true`.
 - Calendar event writes now report occupied-date reschedule conflicts, reconcile interrupted creates with a bounded same-day verification read, and keep unverified writes as terse actionable errors. Activity/event linking now skips verified retries, refuses to overwrite a different pairing, and verifies new links before reporting success.
 - Added fixture-backed calendar reconciliation contracts for same-day distinct sessions, planned/completed linking, provider duplicates, positive/negative timezone offsets and DST, multi-day races, retry idempotency, and interrupted writes.

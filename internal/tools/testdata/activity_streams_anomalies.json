@@ -1,0 +1,8 @@
+[
+ {"type":"time","data":[0,60,180,240]},
+ {"type":"distance","data":[0,500,1500,2000]},
+ {"type":"heartrate","data":[100,110,130,140]},
+ {"type":"watts","data":[200,220,260,280],"anomalies":[{"start_index":1,"end_index":2,"value":220,"valueEnd":260}]},
+ {"type":"cadence","data":[80,82,86,88]},
+ {"type":"altitude","data":[10,15,12,20]}
+]

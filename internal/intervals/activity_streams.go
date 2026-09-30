@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/ricardocabral/icuvisor/internal/streams"
 )
 
 // ActivityStreamsParams contains stream query parameters.
@@ -19,14 +21,22 @@ type ActivityStreamsParams struct {
 type ActivityStream struct {
 	Raw map[string]any `json:"-"`
 
-	Type             string    `json:"type"`
-	Name             string    `json:"name"`
-	Data             []float64 `json:"data"`
-	Data2            []float64 `json:"data2"`
-	ValueTypeIsArray bool      `json:"valueTypeIsArray"`
-	Anomalies        []int     `json:"anomalies"`
-	Custom           bool      `json:"custom"`
-	AllNull          bool      `json:"allNull"`
+	Type             string                  `json:"type"`
+	Name             string                  `json:"name"`
+	Data             []float64               `json:"data"`
+	Data2            []float64               `json:"data2"`
+	ValueTypeIsArray bool                    `json:"valueTypeIsArray"`
+	Anomalies        []ActivityStreamAnomaly `json:"anomalies"`
+	Custom           bool                    `json:"custom"`
+	AllNull          bool                    `json:"allNull"`
+}
+
+// ActivityStreamAnomaly describes an upstream correction over a sample range.
+type ActivityStreamAnomaly struct {
+	StartIndex int `json:"start_index"`
+	EndIndex   int `json:"end_index"`
+	Value      int `json:"value"`
+	ValueEnd   int `json:"valueEnd"`
 }
 
 // UnmarshalJSON decodes ActivityStream while retaining the original object for full responses.
@@ -53,7 +63,13 @@ func (c *Client) GetActivityStreams(ctx context.Context, params ActivityStreamsP
 	}
 	query := url.Values{}
 	if len(params.Types) > 0 {
-		query.Set("types", strings.Join(compactStrings(params.Types), ","))
+		types := compactStrings(params.Types)
+		for i, key := range types {
+			if canonical, _ := streams.CanonicalKey(key); canonical == "heart_rate" {
+				types[i] = "heartrate"
+			}
+		}
+		query.Set("types", strings.Join(types, ","))
 	}
 	if params.IncludeDefaults {
 		query.Set("includeDefaults", "true")

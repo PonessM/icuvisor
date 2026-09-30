@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestActivityStreamUnmarshalPreservesRawFields(t *testing.T) {
 	t.Parallel()
 
 	var got ActivityStream
-	if err := json.Unmarshal([]byte(`{"type":"Power","name":"Watts","data":[250,260.5],"data2":[1,2],"valueTypeIsArray":true,"anomalies":[3,5],"custom":true,"allNull":false,"extra":{"unit":"W"}}`), &got); err != nil {
+	if err := json.Unmarshal([]byte(`{"type":"Power","name":"Watts","data":[250,260.5],"data2":[1,2],"valueTypeIsArray":true,"anomalies":[{"start_index":3,"end_index":5,"value":250,"valueEnd":260},{"start_index":7,"end_index":8,"value":270,"valueEnd":280}],"custom":true,"allNull":false,"extra":{"unit":"W"}}`), &got); err != nil {
 		t.Fatalf("UnmarshalJSON() error = %v", err)
 	}
 	if got.Type != "Power" || got.Name != "Watts" || len(got.Data) != 2 || got.Data[1] != 260.5 || len(got.Data2) != 2 {
@@ -22,6 +23,9 @@ func TestActivityStreamUnmarshalPreservesRawFields(t *testing.T) {
 	}
 	if !got.ValueTypeIsArray || !got.Custom || got.AllNull || len(got.Anomalies) != 2 {
 		t.Fatalf("flags/anomalies = %+v", got)
+	}
+	if got.Anomalies[0] != (ActivityStreamAnomaly{StartIndex: 3, EndIndex: 5, Value: 250, ValueEnd: 260}) {
+		t.Fatalf("anomaly = %+v", got.Anomalies[0])
 	}
 	extra, ok := got.Raw["extra"].(map[string]any)
 	if !ok || extra["unit"] != "W" {
@@ -86,5 +90,37 @@ func TestGetActivityStreamsWrapsHTTPError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "getting activity a1 streams") {
 		t.Fatalf("GetActivityStreams() error = %q, want activity context", err.Error())
+	}
+}
+
+func TestGetActivityStreamsHeartRateAliasesPreserveOtherKeysAndInput(t *testing.T) {
+	t.Parallel()
+	for _, alias := range []string{"heart_rate", "heartRate", "HeartRate", "HR", "hr", "heartrate"} {
+		t.Run(alias, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.Query().Get("types"); got != "heartrate,custom_channel,time" {
+					t.Errorf("types = %q, want heartrate,custom_channel,time", got)
+					http.Error(w, "unexpected types", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[{"type":"heartrate","data":[123]}]`))
+			}))
+			defer server.Close()
+			client := newTestClient(t, server.URL, server.Client(), RetryConfig{})
+			types := []string{" " + alias + " ", "custom_channel", "", " time "}
+			original := append([]string(nil), types...)
+			got, err := client.GetActivityStreams(context.Background(), ActivityStreamsParams{ActivityID: "a1", Types: types})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Type != "heartrate" || len(got[0].Data) != 1 || got[0].Data[0] != 123 {
+				t.Fatalf("streams = %#v", got)
+			}
+			if !reflect.DeepEqual(types, original) {
+				t.Fatalf("input types changed: got %#v, want %#v", types, original)
+			}
+		})
 	}
 }
