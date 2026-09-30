@@ -1,11 +1,17 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -291,6 +297,9 @@ func TestActivityStreamToolsWithUpstreamAnomaliesAndHeartRateNames(t *testing.T)
 			_, _ = w.Write([]byte(`{"icu_intervals":[]}`))
 		case "/activity/run-1/streams":
 			types := r.URL.Query().Get("types")
+			if types != "" && r.URL.Query().Get("includeDefaults") == "true" {
+				t.Errorf("filtered request unexpectedly included defaults: %s", types)
+			}
 			selected := strings.Split(types, ",")
 			for _, key := range selected {
 				if key == "heart_rate" {
@@ -334,6 +343,8 @@ func TestActivityStreamToolsWithUpstreamAnomaliesAndHeartRateNames(t *testing.T)
 	}{
 		{"segment control", newComputeActivitySegmentStatsTool(client, "test", false), `{"activity_id":"run-1","stat":"mean","metric":"heart_rate","start_seconds":0,"end_seconds":240}`},
 		{"streams", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1"}`},
+		{"streams full", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1","include_full":true}`},
+		{"streams window", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1","include_full":true,"time_window":{"start":60,"end":180}}`},
 		{"filtered streams", newGetActivityStreamsTool(client, client, "test", false), `{"activity_id":"run-1","keys":["heart_rate"],"include_full":true}`},
 		{"histogram", newGetActivityHistogramTool(client, client, client, "test", false), `{"activity_id":"run-1","metric":"heart_rate_bpm"}`},
 		{"splits", newGetActivitySplitsTool(client, client, client, client, "test", false), `{"activity_id":"run-1","split_unit":"km"}`},
@@ -353,17 +364,39 @@ func TestActivityStreamToolsWithUpstreamAnomaliesAndHeartRateNames(t *testing.T)
 				if payload["result"].(map[string]any)["value"] != float64(120) {
 					t.Fatalf("mean = %#v", payload)
 				}
-			case "streams", "filtered streams":
+			case "streams", "filtered streams", "streams full", "streams window":
 				hr := payload["streams"].(map[string]any)["heart_rate"].(map[string]any)
 				if hr["type"] != "heartrate" {
 					t.Fatalf("HR metadata = %#v", hr)
 				}
-				if tc.name == "filtered streams" {
+				if tc.name == "filtered streams" || tc.name == "streams full" {
 					if !equalFloatSlices(hr["samples"].([]any), []float64{100, 110, 130, 140}) {
 						t.Fatalf("HR samples = %#v", hr)
 					}
+				} else if tc.name == "streams window" {
+					if !equalFloatSlices(hr["samples"].([]any), []float64{110, 130}) {
+						t.Fatalf("windowed HR = %#v", hr)
+					}
 				} else if _, ok := hr["samples"]; ok {
 					t.Fatalf("terse response includes samples: %#v", hr)
+				}
+				if tc.name != "filtered streams" {
+					meta := payload["_meta"].(map[string]any)
+					diagnostics := meta["data_availability"].([]any)
+					found := false
+					for _, item := range diagnostics {
+						d := item.(map[string]any)
+						if d["reason"] == "channel_decode_failed" && reflect.DeepEqual(d["requested"], []any{"moving"}) {
+							found = true
+						}
+					}
+					if !found {
+						t.Fatalf("missing moving-channel diagnostic: %#v", meta)
+					}
+					moving := payload["streams"].(map[string]any)["moving"].(map[string]any)
+					if moving["samples"] != nil || moving["full"] != nil {
+						t.Fatalf("invalid raw samples leaked: %#v", moving)
+					}
 				}
 			case "histogram":
 				if len(payload["buckets"].([]any)) == 0 {
@@ -374,6 +407,42 @@ func TestActivityStreamToolsWithUpstreamAnomaliesAndHeartRateNames(t *testing.T)
 				if len(splits) != 2 || splits[0].(map[string]any)["average_heart_rate_bpm"] != float64(110) {
 					t.Fatalf("splits = %#v", splits)
 				}
+			}
+		})
+	}
+}
+
+func TestGetActivityStreamsFetchDiagnosticsAreSafe(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"HTTP", &intervals.Error{StatusCode: 500, Kind: intervals.ErrUpstream}, "stream_http_error"},
+		{"decode", &json.UnmarshalTypeError{Value: "string PRIVATE_SAMPLE", Type: reflect.TypeFor[bool](), Field: "custom"}, "stream_response_decode_failed"},
+		{"syntax", &json.SyntaxError{Offset: 15}, "stream_response_decode_failed"},
+		{"size", intervals.ErrResponseTooLarge, "stream_response_too_large"},
+		{"transport", &url.Error{Op: "Get", URL: "https://example.invalid/PRIVATE_SAMPLE", Err: errors.New("PRIVATE_SAMPLE")}, "stream_transport_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeActivityReadClient{activity: decodeActivityFixture(t, `{"id":"run-1","type":"Run"}`), streamErr: fmt.Errorf("PRIVATE_SAMPLE: %w", tc.err)}
+			result, err := newGetActivityStreamsTool(client, client, "test", false).Handler(context.Background(), Request{Arguments: json.RawMessage(`{"activity_id":"run-1"}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := resultMap(t, result)
+			meta := payload["_meta"].(map[string]any)
+			diagnostics := meta["data_availability"].([]any)
+			if diagnostics[0].(map[string]any)["reason"] != tc.want {
+				t.Fatalf("diagnostics = %#v", diagnostics)
+			}
+			if strings.Contains(resultText(t, result), "PRIVATE_SAMPLE") || strings.Contains(logs.String(), "PRIVATE_SAMPLE") {
+				t.Fatal("raw error leaked into response or logs")
 			}
 		})
 	}

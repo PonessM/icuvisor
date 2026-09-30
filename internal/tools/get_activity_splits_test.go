@@ -138,11 +138,11 @@ func TestGetActivitySplitsFetchesBaseAndOptionalChannelsSeparately(t *testing.T)
 	if len(client.streamParamHistory) != 2 {
 		t.Fatalf("stream requests = %#v, want base and optional requests", client.streamParamHistory)
 	}
-	if got := strings.Join(client.streamParamHistory[0].Types, ","); got != "distance,time" || !client.streamParamHistory[0].IncludeDefaults {
-		t.Fatalf("base request = %+v, want distance,time with defaults", client.streamParamHistory[0])
+	if got := strings.Join(client.streamParamHistory[0].Types, ","); got != "distance,time" || client.streamParamHistory[0].IncludeDefaults {
+		t.Fatalf("base request = %+v, want distance,time without defaults", client.streamParamHistory[0])
 	}
-	if got := strings.Join(client.streamParamHistory[1].Types, ","); got != "heart_rate,watts,cadence,altitude" || !client.streamParamHistory[1].IncludeDefaults {
-		t.Fatalf("optional request = %+v, want metric channels with defaults", client.streamParamHistory[1])
+	if got := strings.Join(client.streamParamHistory[1].Types, ","); got != "heart_rate,watts,cadence,altitude" || client.streamParamHistory[1].IncludeDefaults {
+		t.Fatalf("optional request = %+v, want metric channels without defaults", client.streamParamHistory[1])
 	}
 }
 

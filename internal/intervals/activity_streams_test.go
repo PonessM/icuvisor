@@ -124,3 +124,37 @@ func TestGetActivityStreamsHeartRateAliasesPreserveOtherKeysAndInput(t *testing.
 		})
 	}
 }
+
+func TestActivityStreamMalformedOptionalFieldsPreserveNumericChannels(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, raw string
+		field     string
+		wantData  []float64
+	}{
+		{"boolean", `{"type":"moving","data":[true,false]}`, "data", nil},
+		{"mixed samples", `{"type":"watts","data":[200,"bad",250]}`, "data", nil},
+		{"paired data", `{"type":"latlng","data":[1,2],"data2":["bad",3]}`, "data2", []float64{1, 2}},
+		{"anomalies", `{"type":"watts","data":[200,250],"anomalies":[1]}`, "anomalies", []float64{200, 250}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stream ActivityStream
+			if err := json.Unmarshal([]byte(tc.raw), &stream); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(stream.Data, tc.wantData) {
+				t.Fatalf("samples = %#v, want %#v", stream.Data, tc.wantData)
+			}
+			if stream.Raw == nil {
+				t.Fatal("raw evidence lost")
+			}
+			if !reflect.DeepEqual(stream.InvalidFields, []string{tc.field}) {
+				t.Fatalf("invalid fields = %#v", stream.InvalidFields)
+			}
+			if stream.Data2 != nil || stream.Anomalies != nil {
+				t.Fatalf("partially decoded slices retained: %#v", stream)
+			}
+		})
+	}
+}

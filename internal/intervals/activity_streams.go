@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -19,7 +20,8 @@ type ActivityStreamsParams struct {
 
 // ActivityStream contains one intervals.icu activity stream and preserves raw fields.
 type ActivityStream struct {
-	Raw map[string]any `json:"-"`
+	Raw           map[string]any `json:"-"`
+	InvalidFields []string       `json:"-"`
 
 	Type             string                  `json:"type"`
 	Name             string                  `json:"name"`
@@ -47,11 +49,45 @@ func (s *ActivityStream) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var decoded streamAlias
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	fields := struct {
+		*streamAlias
+		Data      json.RawMessage `json:"data"`
+		Data2     json.RawMessage `json:"data2"`
+		Anomalies json.RawMessage `json:"anomalies"`
+	}{streamAlias: &decoded}
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	*s = ActivityStream(decoded)
 	s.Raw = raw
+	for _, field := range []struct {
+		name   string
+		raw    json.RawMessage
+		target any
+	}{
+		{"data", fields.Data, &s.Data},
+		{"data2", fields.Data2, &s.Data2},
+		{"anomalies", fields.Anomalies, &s.Anomalies},
+	} {
+		if len(field.raw) == 0 {
+			continue
+		}
+		if err := json.Unmarshal(field.raw, field.target); err != nil {
+			s.InvalidFields = append(s.InvalidFields, field.name)
+			slog.Default().Warn("activity stream field could not be decoded", "field", field.name)
+		}
+	}
+	// json.Unmarshal can populate a slice before rejecting a later element.
+	for _, field := range s.InvalidFields {
+		switch field {
+		case "data":
+			s.Data = nil
+		case "data2":
+			s.Data2 = nil
+		case "anomalies":
+			s.Anomalies = nil
+		}
+	}
 	return nil
 }
 

@@ -2,8 +2,11 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +25,36 @@ type dataAvailabilityDiagnostic struct {
 	SourceFields  []string `json:"source_fields,omitempty"`
 	MissingFields []string `json:"missing_fields,omitempty"`
 	Dates         []string `json:"dates,omitempty"`
+}
+
+func activityStreamFetchDiagnostic(err error) dataAvailabilityDiagnostic {
+	diagnostic := dataAvailabilityDiagnostic{Reason: "stream_fetch_failed", Message: "The activity stream request failed; retry or check server diagnostics."}
+	var apiError *intervals.Error
+	var typeError *json.UnmarshalTypeError
+	var syntaxError *json.SyntaxError
+	var transportError *url.Error
+	switch {
+	case errors.Is(err, intervals.ErrResponseTooLarge):
+		diagnostic.Reason = "stream_response_too_large"
+		diagnostic.Message = "The stream response exceeded the server size limit; request explicit stream keys."
+	case errors.As(err, &apiError):
+		diagnostic.Reason = "stream_http_error"
+		diagnostic.Message = fmt.Sprintf("The upstream stream request returned HTTP %d.", apiError.StatusCode)
+	case errors.As(err, &typeError):
+		diagnostic.Reason = "stream_response_decode_failed"
+		diagnostic.Message = "The upstream stream response had an incompatible field type."
+		if typeError.Field != "" {
+			diagnostic.SourceFields = []string{typeError.Field}
+		}
+	case errors.As(err, &syntaxError):
+		diagnostic.Reason = "stream_response_decode_failed"
+		diagnostic.Message = "The upstream stream response was not valid JSON."
+	case errors.As(err, &transportError):
+		diagnostic.Reason = "stream_transport_failed"
+		diagnostic.Message = "The stream request could not reach the upstream service; check connectivity and retry."
+	}
+	slog.Default().Warn("activity stream fetch failed", "reason", diagnostic.Reason, "message", diagnostic.Message, "fields", diagnostic.SourceFields)
+	return diagnostic
 }
 
 func restrictedSourceDiagnostic(activityID string, unavailable *unavailableReason) *dataAvailabilityDiagnostic {

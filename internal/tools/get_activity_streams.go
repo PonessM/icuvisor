@@ -263,7 +263,7 @@ func getActivityStreamsHandler(client ActivityStreamsClient, detailsClient Activ
 		}
 		canonicalKeys, unknown := canonicalStreamKeys(args.Keys)
 		upstreamTypes := activityStreamUpstreamTypes(args.Keys, canonicalKeys, args.TimeWindow != nil, args.DistanceWindow != nil)
-		streamsRows, err := client.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: args.ActivityID, Types: upstreamTypes, IncludeDefaults: true})
+		streamsRows, err := client.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: args.ActivityID, Types: upstreamTypes, IncludeDefaults: len(upstreamTypes) == 0})
 		if err != nil {
 			if isContextError(err) {
 				return Result{}, err
@@ -273,6 +273,9 @@ func getActivityStreamsHandler(client ActivityStreamsClient, detailsClient Activ
 				return Result{}, unavailableErr
 			}
 			payload := unavailableActivityStreamsResponse(unavailable, args.IncludeFull, version)
+			if !unavailable.StravaImported {
+				payload.Meta.DataAvailability = append(payload.Meta.DataAvailability, activityStreamFetchDiagnostic(err))
+			}
 			return encodeActivityStreamsPayload(payload, args.IncludeFull, version, debugMetadata, shapeCfg)
 		}
 		payload := shapeActivityStreams(args.ActivityID, streamsRows, canonicalKeys, args.IncludeFull, args.IncludeFull, maxPoints, version, unknown, &activityStreamWindowRequestSet{Time: args.TimeWindow, Distance: args.DistanceWindow})
@@ -594,6 +597,11 @@ func streamHasData2(row intervals.ActivityStream) bool {
 }
 
 func invalidActivityStreamChannels(stream intervals.ActivityStream) (string, string) {
+	for _, field := range stream.InvalidFields {
+		if field == "data" || field == "data2" {
+			return "channel_decode_failed", "The stream " + field + " is not a numeric array; samples were withheld while other channels remain available."
+		}
+	}
 	if rawArrayHasNull(stream.Raw, "data") {
 		return "channel_null", "The stream data contains null values; samples were withheld. Check the upstream recording."
 	}
@@ -663,6 +671,11 @@ func shapeActivityStreams(activityID string, rows []intervals.ActivityStream, re
 			continue
 		}
 		row := activityStreamRow{Type: streamRow.Type, Name: streamRow.Name, AllNull: streamRow.AllNull, Custom: streamRow.Custom}
+		for _, field := range streamRow.InvalidFields {
+			if field == "anomalies" {
+				out.Meta.DataAvailability = append(out.Meta.DataAvailability, dataAvailabilityDiagnostic{Reason: "stream_metadata_decode_failed", Requested: []string{key}, SourceFields: []string{field}, Message: "The stream anomaly metadata could not be decoded; numeric samples remain available."})
+			}
+		}
 		if key == "latlng" {
 			row.SamplesAxis = "latitude_degrees"
 			row.Data2Axis = "longitude_degrees"
@@ -711,6 +724,11 @@ func shapeWindowedActivityStream(row *activityStreamRow, stream intervals.Activi
 	row.SamplingMethod = "unavailable"
 	if selection.Diagnostic != nil {
 		return nil
+	}
+	for _, field := range stream.InvalidFields {
+		if field == "data" || field == "data2" {
+			return windowDiagnostic("channel_decode_failed", firstNonEmpty(stream.Type, stream.Name), "The stream "+field+" is not a numeric array; samples were withheld while other channels remain available.")
+		}
 	}
 	if stream.AllNull {
 		return windowDiagnostic("window_channel_all_null", firstNonEmpty(stream.Type, stream.Name), "The requested stream channel is marked all-null and was withheld from the bounded response.")

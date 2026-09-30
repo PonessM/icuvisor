@@ -84,11 +84,12 @@ func buildActivitySplits(ctx context.Context, args getActivitySplitsRequest, pro
 		diagnostics = append(diagnostics, splitDiagnostic("interval_source_unknown", args.ActivityID, "Upstream interval rows have distance and duration, but their source could not be established; they remain upstream interval rows rather than fixed-distance rows.", nil, nil, nil))
 	}
 
-	baseRows, baseErr := streamsClient.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: args.ActivityID, Types: []string{"distance", "time"}, IncludeDefaults: true})
+	baseRows, baseErr := streamsClient.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: args.ActivityID, Types: []string{"distance", "time"}, IncludeDefaults: false})
 	if baseErr != nil && isContextError(baseErr) {
 		return activitySplitsBuild{}, baseErr
 	}
 	if baseErr != nil {
+		diagnostics = append(diagnostics, activityStreamFetchDiagnostic(baseErr))
 		if explicit100m {
 			return activitySplitsBuild{}, NewUserError(split100mUserMessage, baseErr)
 		}
@@ -137,6 +138,7 @@ func buildActivitySplits(ctx context.Context, args getActivitySplitsRequest, pro
 				return activitySplitsBuild{}, metricErr
 			}
 			diagnostics = append(diagnostics, splitDiagnostic("metric_stream_unavailable", args.ActivityID, "Optional metric streams were unavailable; source interval rows remain without stream-derived enrichment.", splitMetricKeys, nil, nil))
+			diagnostics = append(diagnostics, activityStreamFetchDiagnostic(metricErr))
 		} else if len(base.Time) >= 2 {
 			diagnostics = append(diagnostics, validateMetricStreams(args.ActivityID, metricRows, len(base.Time))...)
 			diagnostics = append(diagnostics, enrichManualSplitRows(manualRows, base, metricRows, args.ActivityID)...)
@@ -157,6 +159,7 @@ func buildActivitySplits(ctx context.Context, args getActivitySplitsRequest, pro
 			return activitySplitsBuild{}, metricErr
 		}
 		diagnostics = append(diagnostics, splitDiagnostic("metric_stream_unavailable", args.ActivityID, "Optional metric streams were unavailable; virtual split duration and pace remain source-derived.", splitMetricKeys, nil, nil))
+		diagnostics = append(diagnostics, activityStreamFetchDiagnostic(metricErr))
 	} else {
 		diagnostics = append(diagnostics, validateMetricStreams(args.ActivityID, metricRows, len(base.Distance))...)
 	}
@@ -392,7 +395,7 @@ func findSplitStream(rows []intervals.ActivityStream, wanted string) (intervals.
 }
 
 func fetchSplitMetricStreams(ctx context.Context, client ActivityStreamsClient, activityID string) (splitMetricStreams, error) {
-	rows, err := client.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: activityID, Types: []string{"heart_rate", "watts", "cadence", "altitude"}, IncludeDefaults: true})
+	rows, err := client.GetActivityStreams(ctx, intervals.ActivityStreamsParams{ActivityID: activityID, Types: []string{"heart_rate", "watts", "cadence", "altitude"}, IncludeDefaults: false})
 	if err != nil {
 		return splitMetricStreams{}, err
 	}
