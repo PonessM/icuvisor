@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-30
+
 ### Added
 
 - `get_activity_details` now preserves the upstream activity description, including an explicit empty string, and returns compact native running-dynamics values with per-field provenance and malformed-value diagnostics without widening activity-list rows.
@@ -475,7 +477,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial public release.
 
-[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.6.5...HEAD
+[Unreleased]: https://github.com/ricardocabral/icuvisor/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/ricardocabral/icuvisor/compare/v1.6.5...v1.7.0
 [1.6.5]: https://github.com/ricardocabral/icuvisor/compare/v1.6.4...v1.6.5
 [1.6.4]: https://github.com/ricardocabral/icuvisor/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/ricardocabral/icuvisor/compare/v1.6.2...v1.6.3
