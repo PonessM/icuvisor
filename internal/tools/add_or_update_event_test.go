@@ -117,14 +117,14 @@ func TestAddOrUpdateEventAcceptsPresentationFields(t *testing.T) {
 func TestAddOrUpdateEventAcceptsWeightTrainingAsFreeTextCalendarEvent(t *testing.T) {
 	t.Parallel()
 
-	description := "Synthetic gym note: squat 3x5 and pull-up practice."
+	description := "## Strength A\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand."
 	client := &fakeEventWriterClient{
 		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345", PreferredUnits: "metric", Timezone: "UTC"}},
-		event:             decodeToolEvents(t, `{"id":"gym-1","category":"WORKOUT","type":"WeightTraining","name":"Gym strength block","start_date_local":"2026-07-08T00:00:00","description":"Synthetic gym note: squat 3x5 and pull-up practice.","tags":["gym","strength"],"time_target":2700}`)[0],
+		event:             decodeToolEvents(t, `{"id":"gym-1","category":"WORKOUT","type":"WeightTraining","name":"Gym strength block","start_date_local":"2026-07-08T00:00:00","description":"## Strength A\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand.","tags":["gym","strength"],"time_target":2700}`)[0],
 	}
 	tool := newAddOrUpdateEventTool(client, client, "test", "UTC", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-07-08","category":"WORKOUT","type":"WeightTraining","name":"Gym strength block","description":"Synthetic gym note: squat 3x5 and pull-up practice.","tags":["gym","strength"],"moving_time_seconds":2700}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"date":"2026-07-08","category":"WORKOUT","type":"WeightTraining","name":"Gym strength block","description":"## Strength A\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand.","tags":["gym","strength"],"moving_time_seconds":2700}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
@@ -646,6 +646,51 @@ func TestAddOrUpdateEventRaceInputExamplesIncludePlanningFields(t *testing.T) {
 		if !seen[category] {
 			t.Fatalf("missing %s race input example in %#v", category, examples)
 		}
+	}
+}
+
+func TestStrengthDescriptionExamplesAreVisibleInToolCatalog(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		schema map[string]any
+	}{
+		{name: addOrUpdateEventName, schema: addOrUpdateEventInputSchema()},
+		{name: updateActivityName, schema: updateActivityInputSchema()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			examples := schemaCatalogExamples(tc.schema)
+			found := false
+			for _, raw := range examples {
+				example, ok := raw.(map[string]any)
+				if !ok {
+					t.Fatalf("catalog example type = %T", raw)
+				}
+				description, _ := example["description"].(string)
+				if !strings.Contains(description, "- Back squat:") {
+					continue
+				}
+				found = true
+				if !strings.Contains(description, "\n\n- Back squat:") || !strings.Contains(description, "\n- Split squat:") || strings.Contains(description, "•") {
+					t.Fatalf("strength example description = %q, want Markdown list with one exercise per line", description)
+				}
+				if err := validateExampleAgainstSchema(tc.schema, jsonRoundTripExample(t, example), tc.name); err != nil {
+					t.Fatalf("strength example invalid: %v", err)
+				}
+				if tc.name == addOrUpdateEventName {
+					if example["type"] != "WeightTraining" || example["category"] != "WORKOUT" {
+						t.Fatalf("strength event example = %#v, want WeightTraining WORKOUT", example)
+					}
+					if _, ok := example["workout_doc"]; ok {
+						t.Fatalf("strength event example must not claim structured workout_doc support: %#v", example)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("%s catalog examples missing visible Markdown strength session: %#v", tc.name, examples)
+			}
+		})
 	}
 }
 

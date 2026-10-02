@@ -13,7 +13,7 @@ import (
 
 const (
 	updateActivityName                    = "update_activity"
-	updateActivityDescription             = "Update one completed non-Strava activity by activity_id: rename it, replace its free-text description, and/or set athlete-logged carbohydrate intake in whole grams. Sparse update: omit a field to leave it unchanged; pass an explicit empty string for description to clear it. carbs_ingested_g accepts 0-2147483647, where zero is a logged zero; clearing is not supported, and read-only carbs_used_g is a distinct upstream estimate. Intervals.icu does not update Strava activities through this endpoint. Gear assignment is not supported by the verified activity-write contract; use get_gear_list only to resolve existing activity gear IDs. Activity descriptions are prose metadata only, not planned-workout structure. This non-destructive metadata edit does not alter recorded streams, intervals, or analyzed metrics. Use set_activity_intervals (delete-mode tool) to write a structured workout_doc as the activity's interval set."
+	updateActivityDescription             = "Update one completed non-Strava activity by activity_id: rename it, replace its free-text description, and/or set athlete-logged carbohydrate intake in whole grams. Sparse update: omit a field to leave it unchanged; pass an explicit empty string for description to clear it. carbs_ingested_g accepts 0-2147483647, where zero is a logged zero; clearing is not supported, and read-only carbs_used_g is a distinct upstream estimate. Intervals.icu does not update Strava activities through this endpoint. Gear assignment is not supported by the verified activity-write contract; use get_gear_list only to resolve existing activity gear IDs. Activity descriptions are prose metadata only, not planned-workout structure. For WeightTraining actuals, use one Markdown '- ' line per exercise and distinguish performed sets, reps, and loads from the plan. This non-destructive metadata edit does not alter recorded streams, intervals, or analyzed metrics. Use set_activity_intervals (delete-mode tool) to write a structured workout_doc as the activity's interval set."
 	invalidUpdateActivityArgumentsMessage = "invalid update_activity arguments; provide activity_id plus at least one of name, description, or carbs_ingested_g; gear assignment is not supported"
 	updateActivityMessage                 = "could not update activity; check intervals.icu credentials, activity ID, and writable activity fields"
 	maxActivityCarbsIngestedG             = 1<<31 - 1
@@ -173,14 +173,20 @@ func updateActivityFieldsUpdated(args updateActivityRequest) []string {
 }
 
 func updateActivityInputSchema() map[string]any {
+	examples := []map[string]any{{
+		"activity_id": "gym-example-1",
+		"description": "## Completed strength\n\n- Back squat: 3 × 5 @ 80 kg total; last set RPE 8.\n- Split squat: 3 × 8/side @ 16 kg per hand; left leg felt harder.",
+	}}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
 		"required":             []string{"activity_id"},
+		"examples":             examples,
+		"input_examples":       examples,
 		"properties": map[string]any{
 			"activity_id":      map[string]any{"type": "string", "description": "Required intervals.icu activity ID. Surrounding whitespace is trimmed; the i-prefix is preserved verbatim."},
 			"name":             map[string]any{"type": "string", "description": "Optional replacement activity title. Omit to leave unchanged. Empty strings are rejected to avoid accidentally blanking the title; intervals.icu's UI also rejects blank titles."},
-			"description":      map[string]any{"type": "string", "description": "Optional replacement free-text activity description; this is not append-only. Omit to leave unchanged; pass an explicit empty string to clear the description. Prose metadata only — to write structured intervals, use set_activity_intervals with a workout_doc."},
+			"description":      map[string]any{"type": "string", "description": "Optional replacement free-text activity description; this is not append-only. Omit to leave unchanged; pass an explicit empty string to clear the description. For completed WeightTraining, read and preserve existing notes when editing, and record performed exercises as one Markdown '- ' line each after a blank line (not '•'); give actual sets/reps or time/distance and explicit load units/basis when known, and do not invent missing values. Prose metadata only — to write structured endurance intervals, use set_activity_intervals with a workout_doc."},
 			"carbs_ingested_g": map[string]any{"type": "integer", "minimum": 0, "maximum": maxActivityCarbsIngestedG, "description": "Optional athlete-logged carbohydrate consumed during this activity, in whole grams (0-2147483647). Zero is a logged zero; omit to leave unchanged. Clearing is not supported. Distinct from read-only carbs_used_g. Intervals.icu does not update Strava activities through this endpoint."},
 			"include_full":     map[string]any{"type": "boolean", "default": false, "description": "When true, include the raw upstream updated-activity payload under full; default returns a terse update confirmation."},
 		},

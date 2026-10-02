@@ -34,13 +34,14 @@ func decodeActivity(t *testing.T, raw string) intervals.Activity {
 func TestUpdateActivitySuccessSparseFields(t *testing.T) {
 	t.Parallel()
 
+	description := "## Completed strength\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand."
 	client := &fakeActivityUpdaterClient{
 		fakeProfileClient: fakeProfileClient{profile: intervals.AthleteWithSportSettings{ID: "i12345"}},
-		activity:          decodeActivity(t, `{"id":"a1","name":"Threshold ride","description":"Held target W","extra":null}`),
+		activity:          decodeActivity(t, `{"id":"a1","name":"Strength A","description":"## Completed strength\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand.","extra":null}`),
 	}
 	tool := newUpdateActivityTool(client, client, "test", false)
 
-	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":" a1 ","name":" Threshold ride ","description":"Held target W","carbs_ingested_g":90,"include_full":true}`)})
+	result, err := tool.Handler(context.Background(), Request{Name: tool.Name, Arguments: json.RawMessage(`{"activity_id":" a1 ","name":" Strength A ","description":"## Completed strength\n\n- Back squat: 3 × 5 @ 80 kg total.\n- Split squat: 3 × 8/side @ 16 kg per hand.","carbs_ingested_g":90,"include_full":true}`)})
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
@@ -48,7 +49,7 @@ func TestUpdateActivitySuccessSparseFields(t *testing.T) {
 		t.Fatalf("calls = %#v, want 1", client.calls)
 	}
 	call := client.calls[0]
-	if call.ActivityID != "a1" || call.Name != "Threshold ride" || !call.NameSet || call.Description != "Held target W" || !call.DescriptionSet || call.CarbsIngested != 90 || !call.CarbsIngestedSet {
+	if call.ActivityID != "a1" || call.Name != "Strength A" || !call.NameSet || call.Description != description || !call.DescriptionSet || call.CarbsIngested != 90 || !call.CarbsIngestedSet {
 		t.Fatalf("call = %#v, want trimmed sparse update", call)
 	}
 	out := resultMap(t, result)

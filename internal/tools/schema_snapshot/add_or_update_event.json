@@ -8,6 +8,14 @@
       "name": "Race-week nutrition plan"
     },
     {
+      "category": "WORKOUT",
+      "date": "2026-07-08",
+      "description": "## Strength A\n\n- Back squat: 3 × 5 @ 80 kg total; rest 2 min; target RPE 7.\n- Split squat: 3 × 8/side @ 16 kg per hand; rest 90 s.",
+      "moving_time_seconds": 2700,
+      "name": "Strength A",
+      "type": "WeightTraining"
+    },
+    {
       "category": "NOTE",
       "date": "2026-06-15",
       "description": "Flight lands at 14:20. Pack pedals, charger, spare cleats, bottles, and race license.",
@@ -121,6 +129,14 @@
       "date": "2026-06-12",
       "description": "Breakfast: oatmeal and banana. Lunch: rice bowl. Carry 90 g carbs/hour for the long ride.",
       "name": "Race-week nutrition plan"
+    },
+    {
+      "category": "WORKOUT",
+      "date": "2026-07-08",
+      "description": "## Strength A\n\n- Back squat: 3 × 5 @ 80 kg total; rest 2 min; target RPE 7.\n- Split squat: 3 × 8/side @ 16 kg per hand; rest 90 s.",
+      "moving_time_seconds": 2700,
+      "name": "Strength A",
+      "type": "WeightTraining"
     },
     {
       "category": "NOTE",
@@ -252,7 +268,7 @@
       "type": "string"
     },
     "description": {
-      "description": "Optional replacement for the upstream event description/DSL, not append-only notes. Omit on updates to leave unchanged. For WORKOUT updates, supplying description without workout_doc can replace existing structured steps; include the desired workout_doc to preserve or merge structure. Preserved verbatim, including whitespace and line breaks. May be supplied with workout_doc; use the \u003c!-- icuvisor:steps --\u003e sentinel on its own line to choose where serialized steps are inserted.",
+      "description": "Optional replacement for the upstream event description/DSL, not append-only notes. Omit on updates to leave unchanged. For WORKOUT updates, supplying description without workout_doc can replace existing structured steps; include the desired workout_doc to preserve or merge structure. Preserved verbatim, including whitespace and line breaks. For a WeightTraining plan, use a blank line before a Markdown list and put each exercise on its own '- ' line (not '•'); include only known sets/reps or time/distance, load with units and basis (total, per hand, or per side), rest, effort, and cues. Keep strength sets out of workout_doc. May be supplied with workout_doc for supported endurance workouts; use the \u003c!-- icuvisor:steps --\u003e sentinel on its own line to choose where serialized steps are inserted.",
       "type": "string"
     },
     "distance_meters": {

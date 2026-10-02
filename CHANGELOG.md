@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- WeightTraining authoring guidance now uses one Markdown `- ` line per exercise in planned-event and completed-activity descriptions, with example sets, loads, units, and effort. The strength-training gap document distinguishes this readable format from native structured strength support.
+
 ## [1.7.2] - 2026-09-30
 
 ### Fixed
